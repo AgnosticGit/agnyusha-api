@@ -15,6 +15,31 @@ enum DeliveryMethodCode {
   POST
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum ProductCategory {
+  DOGS
+  CATS
+}
+
+enum ProductBadge {
+  NONE
+  HIT
+  NEW
+  SALE
+}
+
+enum OrderStatus {
+  NEW
+  CONFIRMED
+  SHIPPED
+  DONE
+  CANCELLED
+}
+
 model DeliveryMethod {
   id          String             @id @default(cuid())
   code        DeliveryMethodCode @unique
@@ -25,4 +50,98 @@ model DeliveryMethod {
   createdAt   DateTime           @default(now()) @map("created_at")
 
   @@map("delivery_methods")
+}
+
+model User {
+  id         String      @id @default(cuid())
+  email      String      @unique
+  role       UserRole    @default(USER)
+  createdAt  DateTime    @default(now()) @map("created_at")
+  magicLinks MagicLink[]
+  sessions   Session[]
+  orders     Order[]
+
+  @@map("users")
+}
+
+model MagicLink {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  tokenHash  String    @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+  @@index([userId, createdAt])
+  @@map("magic_links")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Product {
+  id               String          @id @default(cuid())
+  slug             String          @unique
+  name             String
+  subtitle         String          @default("")
+  image            String
+  category         ProductCategory
+  badge            ProductBadge    @default(NONE)
+  discountPercent  Int?            @map("discount_percent")
+  ingredients      String          @default("")
+  additives        String          @default("")
+  variants         Json
+  sortOrder        Int             @default(0) @map("sort_order")
+  isActive         Boolean         @default(true) @map("is_active")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  orderItems       OrderItem[]
+
+  @@index([category, isActive, sortOrder])
+  @@map("products")
+}
+
+model Order {
+  id               String      @id @default(cuid())
+  userId           String      @map("user_id")
+  status           OrderStatus @default(NEW)
+  phone            String
+  contactChannel   String      @map("contact_channel")
+  cityLabel        String      @map("city_label")
+  deliveryCode     String      @map("delivery_code")
+  deliveryTitle    String      @map("delivery_title")
+  pickupLabel      String?     @map("pickup_label")
+  total            Int
+  createdAt        DateTime    @default(now()) @map("created_at")
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items            OrderItem[]
+
+  @@index([userId, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String  @id @default(cuid())
+  orderId     String  @map("order_id")
+  productId   String? @map("product_id")
+  productName String  @map("product_name")
+  image       String
+  weight      String
+  price       Int
+  qty         Int
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@map("order_items")
 }

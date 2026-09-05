@@ -1,9 +1,11 @@
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
+import cookieParser from 'cookie-parser';
 import { AppModule } from '../../src/app.module';
 import { CDEK_FETCH, type CdekFetch } from '../../src/cdek/cdek.tokens';
 import { CdekService } from '../../src/cdek/cdek.service';
 import { YANDEX_FETCH, type YandexFetch } from '../../src/yandex/yandex.tokens';
+import { MAIL_SEND, type MailSend } from '../../src/mail/mail.tokens';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { DeliveryMethodCode } from '@prisma/client';
 
@@ -26,6 +28,10 @@ export function applyTestDeliveryEnv(options?: {
   process.env.CORS_ORIGIN = 'http://localhost:3000';
   process.env.CDEK_API_URL = 'https://api.edu.cdek.ru';
   process.env.YANDEX_DELIVERY_API_URL = 'https://b2b.taxi.tst.yandex.net';
+  process.env.MAIL_DRIVER = 'resend';
+  process.env.MAIL_FROM = 'Агнюша <onboarding@resend.dev>';
+  process.env.RESEND_API_KEY = '';
+  process.env.MAGIC_LINK_EXPIRES_MINUTES = '15';
 
   if (cdek === 'present') {
     process.env.CDEK_CLIENT_ID = 'test-client-id';
@@ -84,6 +90,7 @@ export function jsonResponse(data: unknown, status = 200): Response {
 export async function createTestApp(options: {
   cdekFetch?: CdekFetch;
   yandexFetch?: YandexFetch;
+  mailSend?: MailSend;
   cdek?: 'present' | 'missing';
   yandex?: 'present' | 'missing';
 }) {
@@ -114,8 +121,13 @@ export async function createTestApp(options: {
     });
   }
 
+  if (options.mailSend) {
+    builder = builder.overrideProvider(MAIL_SEND).useValue(options.mailSend);
+  }
+
   const moduleFixture: TestingModule = await builder.compile();
   const app = moduleFixture.createNestApplication();
+  app.use(cookieParser());
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
