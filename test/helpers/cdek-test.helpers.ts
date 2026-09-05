@@ -1,0 +1,188 @@
+import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import { Test, type TestingModule } from '@nestjs/testing';
+import { AppModule } from '../../src/app.module';
+import { CDEK_FETCH, type CdekFetch } from '../../src/cdek/cdek.tokens';
+import { CdekService } from '../../src/cdek/cdek.service';
+import { YANDEX_FETCH, type YandexFetch } from '../../src/yandex/yandex.tokens';
+import { PrismaService } from '../../src/prisma/prisma.service';
+import { DeliveryMethodCode } from '@prisma/client';
+
+export type MockHttpCall = {
+  url: string;
+  method: string;
+};
+
+export function applyTestDeliveryEnv(options?: {
+  cdek?: 'present' | 'missing';
+  yandex?: 'present' | 'missing';
+}) {
+  const cdek = options?.cdek ?? 'present';
+  const yandex = options?.yandex ?? 'missing';
+
+  process.env.NODE_ENV = 'test';
+  process.env.DATABASE_URL =
+    process.env.DATABASE_URL ||
+    'postgresql://agnyusha:agnyusha@localhost:5433/agnyusha?schema=public';
+  process.env.CORS_ORIGIN = 'http://localhost:3000';
+  process.env.CDEK_API_URL = 'https://api.edu.cdek.ru';
+  process.env.YANDEX_DELIVERY_API_URL = 'https://b2b.taxi.tst.yandex.net';
+
+  if (cdek === 'present') {
+    process.env.CDEK_CLIENT_ID = 'test-client-id';
+    process.env.CDEK_CLIENT_SECRET = 'test-client-secret';
+  } else {
+    process.env.CDEK_CLIENT_ID = '';
+    process.env.CDEK_CLIENT_SECRET = '';
+  }
+
+  if (yandex === 'present') {
+    process.env.YANDEX_DELIVERY_TOKEN = 'test-yandex-token';
+  } else {
+    process.env.YANDEX_DELIVERY_TOKEN = '';
+  }
+}
+
+export function createMockFetch(
+  allowedHostPattern: RegExp,
+  handler: typeof fetch,
+) {
+  const calls: MockHttpCall[] = [];
+
+  const fetchMock: typeof fetch = async (input, init) => {
+    const url = String(input);
+    const method = (init?.method || 'GET').toUpperCase();
+    calls.push({ url, method });
+
+    if (!allowedHostPattern.test(url)) {
+      throw new Error(`Unexpected URL in mock fetch: ${url}`);
+    }
+
+    return handler(input, init);
+  };
+
+  return { fetchMock, calls };
+}
+
+export function createMockCdekFetch(handler: CdekFetch) {
+  return createMockFetch(/^https:\/\/api\.(edu\.)?cdek\.ru\//, handler);
+}
+
+export function createMockYandexFetch(handler: YandexFetch) {
+  return createMockFetch(
+    /^https:\/\/b2b(\.taxi\.tst|-authproxy\.taxi)\.yandex\.net\//,
+    handler,
+  );
+}
+
+export function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+export async function createTestApp(options: {
+  cdekFetch?: CdekFetch;
+  yandexFetch?: YandexFetch;
+  cdek?: 'present' | 'missing';
+  yandex?: 'present' | 'missing';
+}) {
+  applyTestDeliveryEnv({
+    cdek: options.cdek ?? (options.cdekFetch ? 'present' : 'missing'),
+    yandex: options.yandex ?? (options.yandexFetch ? 'present' : 'missing'),
+  });
+
+  let builder = Test.createTestingModule({
+    imports: [AppModule],
+  });
+
+  if (options.cdekFetch) {
+    builder = builder.overrideProvider(CDEK_FETCH).useValue(options.cdekFetch);
+  } else {
+    builder = builder.overrideProvider(CDEK_FETCH).useValue(async () => {
+      throw new Error('CDEK fetch should not be called');
+    });
+  }
+
+  if (options.yandexFetch) {
+    builder = builder
+      .overrideProvider(YANDEX_FETCH)
+      .useValue(options.yandexFetch);
+  } else {
+    builder = builder.overrideProvider(YANDEX_FETCH).useValue(async () => {
+      throw new Error('Yandex fetch should not be called');
+    });
+  }
+
+  const moduleFixture: TestingModule = await builder.compile();
+  const app = moduleFixture.createNestApplication();
+  app.setGlobalPrefix('api');
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
+  await app.init();
+
+  if (options.cdekFetch) {
+    app.get(CdekService).clearTokenCache();
+  }
+
+  return { app, moduleFixture };
+}
+
+/** @deprecated use createTestApp */
+export async function createAppWithMockCdek(fetchMock: CdekFetch) {
+  return createTestApp({ cdekFetch: fetchMock, cdek: 'present', yandex: 'missing' });
+}
+
+export async function ensureDeliveryMethods(app: INestApplication) {
+  const prisma = app.get(PrismaService);
+  const methods = [
+    {
+      code: DeliveryMethodCode.PICKUP,
+      title: 'Самовывоз',
+      description: 'Из пункта в Ленинградской области',
+      sortOrder: 1,
+    },
+    {
+      code: DeliveryMethodCode.COURIER,
+      title: 'Курьер',
+      description: 'Доставка курьером по адресу',
+      sortOrder: 2,
+    },
+    {
+      code: DeliveryMethodCode.CDEK,
+      title: 'СДЭК',
+      description: 'Доставка в пункт выдачи СДЭК',
+      sortOrder: 3,
+    },
+    {
+      code: DeliveryMethodCode.YANDEX,
+      title: 'Яндекс Доставка',
+      description: 'Доставка в пункт выдачи Яндекс',
+      sortOrder: 4,
+    },
+    {
+      code: DeliveryMethodCode.POST,
+      title: 'Почта России',
+      description: 'Доставка Почтой России',
+      sortOrder: 5,
+    },
+  ];
+
+  for (const method of methods) {
+    await prisma.deliveryMethod.upsert({
+      where: { code: method.code },
+      create: method,
+      update: {
+        title: method.title,
+        description: method.description,
+        sortOrder: method.sortOrder,
+        isActive: true,
+      },
+    });
+  }
+}

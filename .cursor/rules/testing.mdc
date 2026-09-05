@@ -1,0 +1,11 @@
+---
+description: Always write integration tests by default; skip only when the user says not to
+alwaysApply: true
+---
+
+# Testing Policy (Backend)
+
+- Always write integration tests for new features and behavior changes, unless the user explicitly asks not to write tests.
+- When changing existing functionality that already has integration coverage, update those tests so they match the new behavior.
+- When adding a new feature, include integration test coverage as part of the work by default.
+- Before finishing work that includes tests, run the full integration suite — not only the newly added tests.

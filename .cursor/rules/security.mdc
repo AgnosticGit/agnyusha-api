@@ -1,0 +1,14 @@
+---
+description: Security is a non-negotiable priority
+alwaysApply: true
+---
+
+# Security
+
+- Treat security of data and the service as a top priority in every change.
+- Assume any user input, URL param, cookie, header, and file upload is untrusted.
+- Never expose secrets, tokens, or PII in logs, responses, URLs, or error messages.
+- Enforce auth/authz on every endpoint; prefer existing guards and patterns; do not weaken checks for convenience.
+- Flag and close potential threats during development: injection, mass assignment, insecure defaults, missing rate limits, over-exposed data, broken access control.
+- If a change introduces or surfaces a security risk, fix it before finishing the task — do not leave it as a follow-up.
+- Validate and sanitize inputs at API boundaries; return safe, generic errors to clients.

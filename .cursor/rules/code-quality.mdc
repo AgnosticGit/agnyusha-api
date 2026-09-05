@@ -1,0 +1,13 @@
+---
+description: Write clear, optimized, professional code
+alwaysApply: true
+---
+
+# Code Quality
+
+- Write code that is clear first, then optimized — prefer readable solutions over clever ones.
+- Keep functions and modules focused; extract only when reuse or clarity improves.
+- Prefer existing project patterns, libraries, and naming over inventing new ones.
+- Avoid unnecessary abstractions, comments, and defensive code that does not address a real risk.
+- Optimize for real bottlenecks (DB queries, N+1, payloads, hot paths) — not premature micro-optimizations.
+- Types, naming, and structure should make intent obvious without lengthy comments.
