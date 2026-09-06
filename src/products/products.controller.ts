@@ -1,25 +1,32 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
+  BadRequestException,
   Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
   Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
-  UploadedFiles,
-  BadRequestException,
-  HttpCode,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
+import { StaffPermission } from '@prisma/client';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { randomBytes } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
 import { ProductsService } from './products.service';
-import { UpsertProductDto } from './dto/product.dto';
-import { AdminGuard } from '../auth/auth.guard';
+import { UpdateStockDto, UpsertProductDto } from './dto/product.dto';
+import { ListInventoryDto } from './dto/list-inventory.dto';
+import {
+  PermissionsGuard,
+  ProductsAccessGuard,
+  RequirePermissions,
+} from '../auth/auth.guard';
 
 const uploadsDir = join(process.cwd(), 'uploads');
 if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
@@ -67,38 +74,42 @@ export class ProductsController {
   }
 
   @Get('admin/products')
-  @UseGuards(AdminGuard)
+  @UseGuards(ProductsAccessGuard)
   listAdmin() {
     return this.products.listAdmin();
   }
 
   @Get('admin/products/:id')
-  @UseGuards(AdminGuard)
+  @UseGuards(ProductsAccessGuard)
   getOne(@Param('id') id: string) {
     return this.products.getById(id);
   }
 
   @Post('admin/products')
-  @UseGuards(AdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions(StaffPermission.PRODUCT_CREATE)
   @HttpCode(201)
   create(@Body() body: UpsertProductDto) {
     return this.products.create(body);
   }
 
   @Patch('admin/products/:id')
-  @UseGuards(AdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions(StaffPermission.PRODUCT_EDIT)
   update(@Param('id') id: string, @Body() body: UpsertProductDto) {
     return this.products.update(id, body);
   }
 
   @Delete('admin/products/:id')
-  @UseGuards(AdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions(StaffPermission.PRODUCT_DELETE)
   remove(@Param('id') id: string) {
     return this.products.remove(id);
   }
 
   @Post('admin/products/:id/images')
-  @UseGuards(AdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions(StaffPermission.PRODUCT_EDIT, StaffPermission.PRODUCT_CREATE)
   @UseInterceptors(FilesInterceptor('files', MAX_PRODUCT_IMAGES, imageUploadOptions))
   async uploadImages(
     @Param('id') id: string,
@@ -109,5 +120,26 @@ export class ProductsController {
       id,
       files.map((file) => `/uploads/${file.filename}`),
     );
+  }
+
+  @Get('admin/inventory')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions(StaffPermission.PRODUCT_STOCK)
+  listInventory(@Query() query: ListInventoryDto) {
+    return this.products.listInventory({
+      q: query.q,
+      page: query.page,
+      limit: query.limit,
+    });
+  }
+
+  @Patch('admin/inventory/:variantId')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions(StaffPermission.PRODUCT_STOCK)
+  updateStock(
+    @Param('variantId') variantId: string,
+    @Body() body: UpdateStockDto,
+  ) {
+    return this.products.updateStock(variantId, body.stock);
   }
 }

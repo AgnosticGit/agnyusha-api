@@ -91,7 +91,7 @@ describe('Catalog admin & orders (e2e)', () => {
         subtitle: 'E2E',
         category: 'DOGS',
         badge: 'HIT',
-        variants: [{ weight: '1 кг.', price: 1000 }],
+        variants: [{ sku: 'E2E-TEST-01', weight: '1 кг.', price: 1000, stock: 10 }],
         ingredients: 'test',
         description: 'test',
       })
@@ -101,6 +101,8 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(create.body.badge).toBe('HIT');
     expect(create.body.badgeLabel).toBe('Хит');
     expect(create.body.badgeColor).toBe('#5fa88a');
+    expect(create.body.variants[0].sku).toBe('E2E-TEST-01');
+    expect(create.body.variants[0].stock).toBe(10);
 
     const xss = await request(app.getHttpServer())
       .post('/api/admin/products')
@@ -108,7 +110,7 @@ describe('Catalog admin & orders (e2e)', () => {
       .send({
         name: 'HTML описание',
         category: 'DOGS',
-        variants: [{ weight: '1 кг.', price: 500 }],
+        variants: [{ sku: 'E2E-XSS-01', weight: '1 кг.', price: 500, stock: 5 }],
         description:
           '<p>Безопасный <strong>текст</strong></p><script>alert(1)</script><img src=x onerror=alert(1)>',
       })
@@ -124,7 +126,7 @@ describe('Catalog admin & orders (e2e)', () => {
       .send({
         name: 'Кастомный бейдж',
         category: 'CATS',
-        variants: [{ weight: '1 кг.', price: 700 }],
+        variants: [{ sku: 'E2E-BADGE-01', weight: '1 кг.', price: 700, stock: 5 }],
         badgeLabel: 'Акция',
         badgeColor: '#c45c26',
         ingredients:
@@ -161,6 +163,7 @@ describe('Catalog admin & orders (e2e)', () => {
         items: [
           {
             productId: create.body.id,
+            variantId: create.body.variants[0].id,
             name: create.body.name,
             image: create.body.image,
             weight: '1 кг.',
@@ -172,6 +175,12 @@ describe('Catalog admin & orders (e2e)', () => {
       .expect(201);
 
     expect(order.body.total).toBe(2000);
+
+    const afterOrder = await request(app.getHttpServer())
+      .get(`/api/admin/products/${create.body.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+    expect(afterOrder.body.variants[0].stock).toBe(8);
 
     const list = await request(app.getHttpServer())
       .get('/api/orders')
@@ -195,7 +204,7 @@ describe('Catalog admin & orders (e2e)', () => {
       .send({
         name: 'Товар с галереей',
         category: 'DOGS',
-        variants: [{ weight: '1 кг.', price: 500 }],
+        variants: [{ sku: 'E2E-IMG-01', weight: '1 кг.', price: 500, stock: 3 }],
         images: ['/assets/product-turkey.png'],
       })
       .expect(201);
@@ -226,7 +235,15 @@ describe('Catalog admin & orders (e2e)', () => {
       .send({
         name: 'Товар с галереей',
         category: 'DOGS',
-        variants: [{ weight: '1 кг.', price: 500 }],
+        variants: [
+          {
+            id: create.body.variants[0].id,
+            sku: 'E2E-IMG-01',
+            weight: '1 кг.',
+            price: 500,
+            stock: 3,
+          },
+        ],
         images: [uploaded.body.images[1], uploaded.body.images[0]],
       })
       .expect(200);
@@ -372,5 +389,146 @@ describe('Catalog admin & orders (e2e)', () => {
       .delete(`/api/admin/users/${admin.user.id}`)
       .set('Cookie', admin.cookie)
       .expect(403);
+  });
+
+  it('rejects product create without sku on variants', async () => {
+    const admin = await loginAs(app, 'admin-sku@example.com', UserRole.ADMIN);
+    await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Без артикула',
+        category: 'DOGS',
+        variants: [{ weight: '1 кг.', price: 100, stock: 1 }],
+      })
+      .expect(400);
+  });
+
+  it('staff permissions gate product and inventory APIs', async () => {
+    const manager = await loginAs(app, 'manager-e2e@example.com', UserRole.MANAGER);
+    const prisma = app.get(PrismaService);
+    const staffUser = await prisma.user.upsert({
+      where: { email: 'staff-stock@example.com' },
+      create: { email: 'staff-stock@example.com', role: UserRole.STAFF },
+      update: { role: UserRole.STAFF },
+    });
+    await prisma.userPermission.deleteMany({ where: { userId: staffUser.id } });
+    await prisma.userPermission.create({
+      data: {
+        userId: staffUser.id,
+        permission: 'PRODUCT_STOCK',
+      },
+    });
+    const raw = createRawToken();
+    await prisma.session.create({
+      data: {
+        userId: staffUser.id,
+        tokenHash: hashToken(raw),
+        expiresAt: new Date(Date.now() + 86400000),
+      },
+    });
+    const staffCookie = `${SESSION_COOKIE}=${raw}`;
+
+    await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', staffCookie)
+      .send({
+        name: 'No create',
+        category: 'DOGS',
+        variants: [{ sku: 'NOPE-01', weight: '1 кг.', price: 100, stock: 1 }],
+      })
+      .expect(403);
+
+    const admin = await loginAs(app, 'admin-stock@example.com', UserRole.ADMIN);
+    const created = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Stock gate',
+        category: 'DOGS',
+        variants: [{ sku: 'STOCK-GATE-01', weight: '1 кг.', price: 100, stock: 2 }],
+      })
+      .expect(201);
+
+    const inv = await request(app.getHttpServer())
+      .get('/api/admin/inventory')
+      .query({ page: 1, limit: 10 })
+      .set('Cookie', staffCookie)
+      .expect(200);
+    expect(Array.isArray(inv.body.items)).toBe(true);
+    expect(inv.body.page).toBe(1);
+    expect(inv.body.limit).toBe(10);
+    expect(typeof inv.body.total).toBe('number');
+    expect(inv.body.items[0]?.product?.image).toBeTruthy();
+
+    const page2 = await request(app.getHttpServer())
+      .get('/api/admin/inventory')
+      .query({ page: 1, limit: 1 })
+      .set('Cookie', staffCookie)
+      .expect(200);
+    expect(page2.body.items).toHaveLength(1);
+    expect(page2.body.total).toBeGreaterThanOrEqual(1);
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/inventory/${created.body.variants[0].id}`)
+      .set('Cookie', staffCookie)
+      .send({ stock: 7 })
+      .expect(200);
+
+    const buyer = await loginAs(app, 'stock-buyer@example.com', UserRole.USER);
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', buyer.cookie)
+      .send({
+        phone: '+7 (999) 111-22-33',
+        contactChannel: 'Telegram',
+        cityLabel: 'Москва',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        items: [
+          {
+            productId: created.body.id,
+            variantId: created.body.variants[0].id,
+            name: created.body.name,
+            image: created.body.image,
+            weight: '1 кг.',
+            price: 100,
+            qty: 99,
+          },
+        ],
+      })
+      .expect(400);
+
+    const analytics = await request(app.getHttpServer())
+      .get('/api/admin/analytics/overview')
+      .set('Cookie', manager.cookie)
+      .expect(200);
+    expect(analytics.body.totals).toBeDefined();
+    expect(Array.isArray(analytics.body.revenueByDay)).toBe(true);
+
+    const ranged = await request(app.getHttpServer())
+      .get('/api/admin/analytics/overview')
+      .query({ from: '2020-01-01', to: '2020-01-07' })
+      .set('Cookie', manager.cookie)
+      .expect(200);
+    expect(ranged.body.revenueByDay).toHaveLength(7);
+    expect(ranged.body.totals.orders).toBe(0);
+
+    const promoted = await request(app.getHttpServer())
+      .patch(`/api/admin/users/${staffUser.id}/role`)
+      .set('Cookie', manager.cookie)
+      .send({
+        role: 'STAFF',
+        permissions: ['PRODUCT_CREATE', 'PRODUCT_STOCK'],
+      })
+      .expect(200);
+    expect(promoted.body.permissions).toEqual(
+      expect.arrayContaining(['PRODUCT_CREATE', 'PRODUCT_STOCK']),
+    );
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${created.body.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
   });
 });

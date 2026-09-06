@@ -17,7 +17,16 @@ enum DeliveryMethodCode {
 
 enum UserRole {
   USER
+  STAFF
+  MANAGER
   ADMIN
+}
+
+enum StaffPermission {
+  PRODUCT_CREATE
+  PRODUCT_DELETE
+  PRODUCT_EDIT
+  PRODUCT_STOCK
 }
 
 enum ProductCategory {
@@ -53,16 +62,26 @@ model DeliveryMethod {
 }
 
 model User {
-  id         String      @id @default(cuid())
-  email      String      @unique
-  role       UserRole    @default(USER)
-  bannedAt   DateTime?   @map("banned_at")
-  createdAt  DateTime    @default(now()) @map("created_at")
-  magicLinks MagicLink[]
-  sessions   Session[]
-  orders     Order[]
+  id          String           @id @default(cuid())
+  email       String           @unique
+  role        UserRole         @default(USER)
+  bannedAt    DateTime?        @map("banned_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  magicLinks  MagicLink[]
+  sessions    Session[]
+  orders      Order[]
+  permissions UserPermission[]
 
   @@map("users")
+}
+
+model UserPermission {
+  userId     String          @map("user_id")
+  permission StaffPermission
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permission])
+  @@map("user_permissions")
 }
 
 model MagicLink {
@@ -92,31 +111,46 @@ model Session {
 }
 
 model Product {
-  id               String          @id @default(cuid())
-  slug             String          @unique
+  id               String           @id @default(cuid())
+  slug             String           @unique
   name             String
-  subtitle         String          @default("")
+  subtitle         String           @default("")
   image            String
-  images           String[]        @default([])
+  images           String[]         @default([])
   category         ProductCategory
-  badge            ProductBadge    @default(NONE)
-  badgeLabel       String          @default("") @map("badge_label")
-  badgeColor       String          @default("") @map("badge_color")
-  discountPercent  Int?            @map("discount_percent")
-  ingredients      String          @default("")
-  description      String          @default("")
-  nutritionProtein Float?          @map("nutrition_protein")
-  nutritionFat     Float?          @map("nutrition_fat")
-  nutritionCarbs   Float?          @map("nutrition_carbs")
-  variants         Json
-  sortOrder        Int             @default(0) @map("sort_order")
-  isActive         Boolean         @default(true) @map("is_active")
-  createdAt        DateTime        @default(now()) @map("created_at")
-  updatedAt        DateTime        @updatedAt @map("updated_at")
+  badge            ProductBadge     @default(NONE)
+  badgeLabel       String           @default("") @map("badge_label")
+  badgeColor       String           @default("") @map("badge_color")
+  discountPercent  Int?             @map("discount_percent")
+  ingredients      String           @default("")
+  description      String           @default("")
+  nutritionProtein Float?           @map("nutrition_protein")
+  nutritionFat     Float?           @map("nutrition_fat")
+  nutritionCarbs   Float?           @map("nutrition_carbs")
+  sortOrder        Int              @default(0) @map("sort_order")
+  isActive         Boolean          @default(true) @map("is_active")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  variants         ProductVariant[]
   orderItems       OrderItem[]
 
   @@index([category, isActive, sortOrder])
   @@map("products")
+}
+
+model ProductVariant {
+  id        String   @id @default(cuid())
+  productId String   @map("product_id")
+  sku       String   @unique
+  weight    String
+  price     Int
+  stock     Int      @default(0)
+  sortOrder Int      @default(0) @map("sort_order")
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@index([productId, sortOrder])
+  @@map("product_variants")
 }
 
 model Order {
@@ -137,20 +171,23 @@ model Order {
   items              OrderItem[]
 
   @@index([userId, createdAt])
+  @@index([createdAt])
   @@map("orders")
 }
 
 model OrderItem {
-  id          String  @id @default(cuid())
-  orderId     String  @map("order_id")
-  productId   String? @map("product_id")
-  productName String  @map("product_name")
+  id          String          @id @default(cuid())
+  orderId     String          @map("order_id")
+  productId   String?         @map("product_id")
+  variantId   String?         @map("variant_id")
+  productName String          @map("product_name")
   image       String
   weight      String
   price       Int
   qty         Int
-  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product     Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  order       Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
   @@map("order_items")
 }

@@ -15,6 +15,10 @@ export class CreateOrderItemDto {
   @IsString()
   productId?: string;
 
+  @IsOptional()
+  @IsString()
+  variantId?: string;
+
   @IsString()
   @MinLength(1)
   name!: string;

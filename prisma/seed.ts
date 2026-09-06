@@ -25,10 +25,10 @@ const productsSeed = [
     nutritionFat: 16,
     nutritionCarbs: 42,
     variants: [
-      { weight: '0,8 кг.', price: 725 },
-      { weight: '2,5 кг.', price: 1850 },
-      { weight: '5 кг.', price: 3400 },
-      { weight: '12 кг.', price: 7200 },
+      { sku: 'AGN-TURKEY-01', weight: '0,8 кг.', price: 725, stock: 50 },
+      { sku: 'AGN-TURKEY-02', weight: '2,5 кг.', price: 1850, stock: 40 },
+      { sku: 'AGN-TURKEY-03', weight: '5 кг.', price: 3400, stock: 30 },
+      { sku: 'AGN-TURKEY-04', weight: '12 кг.', price: 7200, stock: 20 },
     ],
     ingredients:
       'Мясные ингредиенты 55% (свежее мясо индейки 27%, дегидрированное мясо птицы премиум класса 14%, дегидрированное мясо птицы стандарт 14%) рис, животный жир (источник омега 6), гречка, кукуруза, овсяные хлопья, глютен, пивные дрожжи (источник MOS и витаминов группы B), льняное семя (источник омега 3), сушеный корень цикория (натуральный источник инулина), витаминно-минеральные комплексы, тыква, томат (источник ликопина и минералов), свекла, яблоко, Экстракт Юкки Шидигера, яичный порошок, целлюлоза микрокристаллическая.',
@@ -48,10 +48,10 @@ const productsSeed = [
     nutritionFat: 17,
     nutritionCarbs: 40,
     variants: [
-      { weight: '0,8 кг.', price: 800 },
-      { weight: '2,5 кг.', price: 2050 },
-      { weight: '5 кг.', price: 3750 },
-      { weight: '12 кг.', price: 7900 },
+      { sku: 'AGN-BEEF-01', weight: '0,8 кг.', price: 800, stock: 50 },
+      { sku: 'AGN-BEEF-02', weight: '2,5 кг.', price: 2050, stock: 40 },
+      { sku: 'AGN-BEEF-03', weight: '5 кг.', price: 3750, stock: 30 },
+      { sku: 'AGN-BEEF-04', weight: '12 кг.', price: 7900, stock: 20 },
     ],
     ingredients:
       'Мясные ингредиенты 55% (свежее мясо говядины 27%, дегидрированное мясо говядины 14%, дегидрированное мясо птицы премиум класса 14%) картофель, рис, животный жир (источник омега 6), гречка, кукуруза, овсяные хлопья, глютен, пивные дрожжи (источник MOS и витаминов группы B), льняное семя (источник омега 3), сушеный корень цикория (натуральный источник инулина), целлюлоза микрокристаллическая, тыква, томат (источник ликопина и минералов), свекла, яблоко, Экстракт Юкки Шидигера, яичный порошок, розмарин, стабилизирован антиоксидантами (в том числе экстракт розмарина и витамины Е и С).',
@@ -71,10 +71,10 @@ const productsSeed = [
     nutritionFat: 14,
     nutritionCarbs: 43,
     variants: [
-      { weight: '0,8 кг.', price: 855 },
-      { weight: '2,5 кг.', price: 2200 },
-      { weight: '5 кг.', price: 4000 },
-      { weight: '12 кг.', price: 8500 },
+      { sku: 'AGN-FISH-01', weight: '0,8 кг.', price: 855, stock: 50 },
+      { sku: 'AGN-FISH-02', weight: '2,5 кг.', price: 2200, stock: 40 },
+      { sku: 'AGN-FISH-03', weight: '5 кг.', price: 4000, stock: 30 },
+      { sku: 'AGN-FISH-04', weight: '12 кг.', price: 8500, stock: 20 },
     ],
     ingredients:
       'Мясные ингредиенты 55% (свежее мясо белой рыбы 27%, дегидрированная белая рыба 14%, дегидрированное мясо птицы премиум класса 14%) рис, животный жир (источник омега 6), гречка, кукуруза, овсяные хлопья, глютен, пивные дрожжи (источник MOS и витаминов группы B), льняное семя (источник омега 3), сушеный корень цикория (натуральный источник инулина), целлюлоза микрокристаллическая, витаминно-минеральные комплексы, тыква, томат (источник ликопина и минералов), свекла, яблоко, Экстракт Юкки Шидигера, яичный порошок, L-карнитин, розмарин.',
@@ -94,8 +94,8 @@ const productsSeed = [
     nutritionFat: 12,
     nutritionCarbs: 30,
     variants: [
-      { weight: '0,25 кг.', price: 400 },
-      { weight: '2,5 кг.', price: 2800 },
+      { sku: 'AGN-CATFISH-01', weight: '0,25 кг.', price: 400, stock: 50 },
+      { sku: 'AGN-CATFISH-02', weight: '2,5 кг.', price: 2800, stock: 30 },
     ],
     ingredients:
       'Мясные ингредиенты 53% (свежая белая рыба 23%, дегидрированная рыба 10%, дегидрированная домашняя птица 16%, гидролизат печени 4%) картофель, маисовый протеин, рис, животный жир (источник омега 6), плазма крови, пивные дрожжи (источник MOS и витаминов группы B), льняное семя и рыбий жир (источник омега 3), сушеный корень цикория (натуральный источник инулина), метионин, таурин, витаминно-минеральные комплексы, экстракт Юкки Шидигера, клюква, L-карнитин, розмарин, стабилизирован антиоксидантами (в том числе экстракт розмарина и витамины Е и С), целлюлоза микрокристаллическая.',
@@ -114,9 +114,9 @@ const productsSeed = [
     nutritionFat: 18,
     nutritionCarbs: 32,
     variants: [
-      { weight: '0,25 кг.', price: 430 },
-      { weight: '0,7 кг.', price: 980 },
-      { weight: '2,5 кг.', price: 2950 },
+      { sku: 'AGN-KITTEN-01', weight: '0,25 кг.', price: 430, stock: 50 },
+      { sku: 'AGN-KITTEN-02', weight: '0,7 кг.', price: 980, stock: 40 },
+      { sku: 'AGN-KITTEN-03', weight: '2,5 кг.', price: 2950, stock: 30 },
     ],
     ingredients:
       'Мясные ингредиенты 46% (дегидрированная индейка 26%, свежее мясо курицы 20%) кукуруза, рис, кукурузный белок, животный жир (источник омега 6), гидролизат печени, гороховый протеин, плазма крови, пивные дрожжи (источник MOS и витаминов группы B), льняное семя и рыбий жир (источник омега 3), сушеная мякоть свеклы, сушеный корень цикория (натуральный источник инулина), метионин, таурин, витаминно-минеральные комплексы, экстракт Юкки Шидигера, L-карнитин, розмарин, стабилизирован антиоксидантами (в том числе экстракт розмарина и витамины Е и С), целлюлоза микрокристаллическая.',
@@ -185,15 +185,17 @@ async function seedAdmin() {
 async function seedProducts() {
   for (const p of productsSeed) {
     const badge = legacyBadgeFields(p.badge, p.discountPercent);
-    const data = {
-      ...p,
+    const { variants, ...rest } = p;
+    const productData = {
+      ...rest,
       images: [p.image],
       badgeLabel: badge.badgeLabel,
       badgeColor: badge.badgeColor,
     };
-    await prisma.product.upsert({
+
+    const product = await prisma.product.upsert({
       where: { slug: p.slug },
-      create: data,
+      create: productData,
       update: {
         name: p.name,
         subtitle: p.subtitle,
@@ -209,11 +211,42 @@ async function seedProducts() {
         nutritionProtein: p.nutritionProtein,
         nutritionFat: p.nutritionFat,
         nutritionCarbs: p.nutritionCarbs,
-        variants: p.variants,
         sortOrder: p.sortOrder,
         isActive: true,
       },
     });
+
+    for (const [index, v] of variants.entries()) {
+      const existing = await prisma.productVariant.findFirst({
+        where: {
+          OR: [{ sku: v.sku }, { productId: product.id, weight: v.weight }],
+        },
+      });
+      if (existing) {
+        await prisma.productVariant.update({
+          where: { id: existing.id },
+          data: {
+            sku: v.sku,
+            weight: v.weight,
+            price: v.price,
+            stock: v.stock,
+            sortOrder: index,
+            productId: product.id,
+          },
+        });
+      } else {
+        await prisma.productVariant.create({
+          data: {
+            productId: product.id,
+            sku: v.sku,
+            weight: v.weight,
+            price: v.price,
+            stock: v.stock,
+            sortOrder: index,
+          },
+        });
+      }
+    }
   }
   console.log(`Products: ${productsSeed.length}`);
 }

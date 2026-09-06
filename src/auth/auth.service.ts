@@ -132,6 +132,27 @@ export class AuthService {
     }
   }
 
+  private async permissionsForUser(userId: string) {
+    const rows = await this.prisma.userPermission.findMany({
+      where: { userId },
+      select: { permission: true },
+    });
+    return rows.map((r) => r.permission);
+  }
+
+  private async toAuthUser(user: {
+    id: string;
+    email: string;
+    role: AuthUser['role'];
+  }): Promise<AuthUser> {
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      permissions: await this.permissionsForUser(user.id),
+    };
+  }
+
   private async createSessionForUser(user: {
     id: string;
     email: string;
@@ -160,7 +181,7 @@ export class AuthService {
 
     return {
       sessionToken,
-      user: { id: user.id, email: user.email, role: user.role },
+      user: await this.toAuthUser(user),
       maxAgeMs,
     };
   }
@@ -378,11 +399,7 @@ export class AuthService {
       await this.prisma.session.deleteMany({ where: { userId: session.userId } });
       return null;
     }
-    return {
-      id: session.user.id,
-      email: session.user.email,
-      role: session.user.role,
-    };
+    return this.toAuthUser(session.user);
   }
 
   async logout(rawToken: string | undefined) {

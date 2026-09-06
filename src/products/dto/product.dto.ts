@@ -14,6 +14,14 @@ import { Type } from 'class-transformer';
 import { ProductBadge, ProductCategory } from '@prisma/client';
 
 export class ProductVariantInput {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsString()
+  @MinLength(1)
+  sku!: string;
+
   @IsString()
   @MinLength(1)
   weight!: string;
@@ -21,6 +29,15 @@ export class ProductVariantInput {
   @IsInt()
   @Min(0)
   price!: number;
+
+  @IsInt()
+  @Min(0)
+  stock!: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
 }
 
 export class UpsertProductDto {
@@ -103,4 +120,10 @@ export class UpsertProductDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+}
+
+export class UpdateStockDto {
+  @IsInt()
+  @Min(0)
+  stock!: number;
 }

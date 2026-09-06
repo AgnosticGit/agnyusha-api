@@ -17,7 +17,6 @@ function estimateWeightGrams(weight: string): number {
   if (/г(?!\w)|g\b/.test(normalized) && !/кг|kg/.test(normalized)) {
     return Math.max(100, Math.round(value));
   }
-  // Treat bare numbers and "кг" as kilograms.
   return Math.max(100, Math.round(value * 1000));
 }
 
@@ -55,7 +54,7 @@ export class OrdersService {
         comment: `Заказ Агнюша · ${dto.cityLabel}`,
         items: dto.items.map((item, index) => ({
           name: item.name,
-          article: item.productId || `SKU-${index + 1}`,
+          article: item.variantId || item.productId || `SKU-${index + 1}`,
           price: item.price,
           qty: item.qty,
           weightGrams: estimateWeightGrams(item.weight),
@@ -65,31 +64,97 @@ export class OrdersService {
     }
 
     const total = dto.items.reduce((s, i) => s + i.price * i.qty, 0);
-    const order = await this.prisma.order.create({
-      data: {
-        userId,
-        phone: dto.phone.trim(),
-        contactChannel: dto.contactChannel.trim(),
-        cityLabel: dto.cityLabel.trim(),
-        deliveryCode,
-        deliveryTitle: dto.deliveryTitle.trim(),
-        pickupLabel: dto.pickupLabel?.trim() || null,
-        pickupCode,
-        externalDeliveryId,
-        total,
-        items: {
-          create: dto.items.map((item) => ({
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const resolvedItems: Array<{
+        productId: string | null;
+        variantId: string | null;
+        productName: string;
+        image: string;
+        weight: string;
+        price: number;
+        qty: number;
+      }> = [];
+
+      for (const item of dto.items) {
+        let variant =
+          item.variantId != null
+            ? await tx.productVariant.findUnique({
+                where: { id: item.variantId },
+                include: { product: true },
+              })
+            : null;
+
+        if (!variant && item.productId) {
+          variant = await tx.productVariant.findFirst({
+            where: {
+              productId: item.productId,
+              weight: item.weight.trim(),
+            },
+            include: { product: true },
+          });
+        }
+
+        if (variant) {
+          if (variant.stock < item.qty) {
+            throw new BadRequestException(
+              `В наличии только ${variant.stock} шт. — ${variant.product.name} (${variant.weight})`,
+            );
+          }
+          const updated = await tx.productVariant.updateMany({
+            where: { id: variant.id, stock: { gte: item.qty } },
+            data: { stock: { decrement: item.qty } },
+          });
+          if (updated.count !== 1) {
+            const fresh = await tx.productVariant.findUnique({
+              where: { id: variant.id },
+            });
+            throw new BadRequestException(
+              `В наличии только ${fresh?.stock ?? 0} шт. — ${variant.product.name} (${variant.weight})`,
+            );
+          }
+          resolvedItems.push({
+            productId: variant.productId,
+            variantId: variant.id,
+            productName: item.name,
+            image: item.image,
+            weight: variant.weight,
+            price: item.price,
+            qty: item.qty,
+          });
+        } else {
+          resolvedItems.push({
             productId: item.productId || null,
+            variantId: null,
             productName: item.name,
             image: item.image,
             weight: item.weight,
             price: item.price,
             qty: item.qty,
-          })),
+          });
+        }
+      }
+
+      return tx.order.create({
+        data: {
+          userId,
+          phone: dto.phone.trim(),
+          contactChannel: dto.contactChannel.trim(),
+          cityLabel: dto.cityLabel.trim(),
+          deliveryCode,
+          deliveryTitle: dto.deliveryTitle.trim(),
+          pickupLabel: dto.pickupLabel?.trim() || null,
+          pickupCode,
+          externalDeliveryId,
+          total,
+          items: {
+            create: resolvedItems,
+          },
         },
-      },
-      include: { items: true },
+        include: { items: true },
+      });
     });
+
     return this.map(order);
   }
 
@@ -127,6 +192,7 @@ export class OrdersService {
     items: Array<{
       id: string;
       productId: string | null;
+      variantId?: string | null;
       productName: string;
       image: string;
       weight: string;
@@ -150,6 +216,7 @@ export class OrdersService {
       items: order.items.map((i) => ({
         id: i.id,
         productId: i.productId,
+        variantId: i.variantId ?? null,
         name: i.productName,
         image: i.image,
         weight: i.weight,

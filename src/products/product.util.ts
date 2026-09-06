@@ -1,6 +1,10 @@
 export type ProductVariantDto = {
+  id?: string;
+  sku: string;
   weight: string;
   price: number;
+  stock: number;
+  sortOrder?: number;
 };
 
 const DEFAULT_PRODUCT_IMAGE = '/assets/product-turkey.png';
@@ -16,7 +20,8 @@ export function normalizeProductImages(
   if (fromGallery.length) {
     return { images: fromGallery, image: fromGallery[0] };
   }
-  const cover = String(image ?? DEFAULT_PRODUCT_IMAGE).trim() || DEFAULT_PRODUCT_IMAGE;
+  const cover =
+    String(image ?? DEFAULT_PRODUCT_IMAGE).trim() || DEFAULT_PRODUCT_IMAGE;
   return { image: cover, images: [cover] };
 }
 
@@ -56,20 +61,45 @@ const CYR_TO_LAT: Record<string, string> = {
   я: 'ya',
 };
 
-export function parseVariants(raw: unknown): ProductVariantDto[] {
+export function parseVariantInputs(raw: unknown): ProductVariantDto[] {
   if (!Array.isArray(raw)) return [];
-  return raw
-    .map((v) => {
-      if (!v || typeof v !== 'object') return null;
-      const weight = String((v as { weight?: unknown }).weight ?? '').trim();
-      const price = Number((v as { price?: unknown }).price);
-      if (!weight || !Number.isFinite(price) || price < 0) return null;
-      return { weight, price: Math.round(price) };
-    })
-    .filter((v): v is ProductVariantDto => v !== null);
+  const parsed: ProductVariantDto[] = [];
+  for (const [index, v] of raw.entries()) {
+    if (!v || typeof v !== 'object') continue;
+    const row = v as {
+      id?: unknown;
+      sku?: unknown;
+      weight?: unknown;
+      price?: unknown;
+      stock?: unknown;
+      sortOrder?: unknown;
+    };
+    const sku = String(row.sku ?? '')
+      .trim()
+      .toUpperCase();
+    const weight = String(row.weight ?? '').trim();
+    const price = Number(row.price);
+    const stock = Number(row.stock ?? 0);
+    const id = row.id != null ? String(row.id).trim() || undefined : undefined;
+    const sortOrder =
+      row.sortOrder != null && Number.isFinite(Number(row.sortOrder))
+        ? Math.round(Number(row.sortOrder))
+        : index;
+    if (!sku || !weight || !Number.isFinite(price) || price < 0) continue;
+    if (!Number.isFinite(stock) || stock < 0) continue;
+    parsed.push({
+      ...(id ? { id } : {}),
+      sku,
+      weight,
+      price: Math.round(price),
+      stock: Math.round(stock),
+      sortOrder,
+    });
+  }
+  return parsed;
 }
 
-export function minPrice(variants: ProductVariantDto[]): number {
+export function minPrice(variants: Array<{ price: number }>): number {
   if (!variants.length) return 0;
   return Math.min(...variants.map((v) => v.price));
 }

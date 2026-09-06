@@ -1,7 +1,8 @@
-import type { UserRole } from '@prisma/client';
+import type { StaffPermission, UserRole } from '@prisma/client';
 
 export type AuthUser = {
   id: string;
   email: string;
   role: UserRole;
+  permissions: StaffPermission[];
 };
