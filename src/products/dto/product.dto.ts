@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -39,12 +40,25 @@ export class UpsertProductDto {
   @IsString()
   image?: string;
 
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
+
   @IsEnum(ProductCategory)
   category!: ProductCategory;
 
   @IsOptional()
   @IsEnum(ProductBadge)
   badge?: ProductBadge;
+
+  @IsOptional()
+  @IsString()
+  badgeLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  badgeColor?: string;
 
   @IsOptional()
   @IsInt()
@@ -57,7 +71,25 @@ export class UpsertProductDto {
 
   @IsOptional()
   @IsString()
-  additives?: string;
+  description?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  nutritionProtein?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  nutritionFat?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  nutritionCarbs?: number | null;
 
   @IsArray()
   @ValidateNested({ each: true })

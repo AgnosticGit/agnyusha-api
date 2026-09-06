@@ -4,14 +4,20 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  ProductBadge,
-  ProductCategory,
   type Product,
   type Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { UpsertProductDto } from './dto/product.dto';
-import { minPrice, parseVariants, slugify } from './product.util';
+import {
+  minPrice,
+  normalizeProductImages,
+  normalizeSlug,
+  parseVariants,
+  slugify,
+} from './product.util';
+import { sanitizeProductHtml } from './sanitize-description';
+import { resolveBadgeRead, resolveBadgeWrite } from './badge.util';
 
 @Injectable()
 export class ProductsService {
@@ -19,17 +25,28 @@ export class ProductsService {
 
   private map(product: Product) {
     const variants = parseVariants(product.variants);
+    const { image, images } = normalizeProductImages(
+      product.images,
+      product.image,
+    );
+    const badge = resolveBadgeRead(product);
     return {
       id: product.id,
       slug: product.slug,
       name: product.name,
       subtitle: product.subtitle,
-      image: product.image,
+      image,
+      images,
       category: product.category,
       badge: product.badge,
+      badgeLabel: badge.badgeLabel,
+      badgeColor: badge.badgeColor,
       discountPercent: product.discountPercent,
-      ingredients: product.ingredients,
-      additives: product.additives,
+      ingredients: sanitizeProductHtml(product.ingredients),
+      description: sanitizeProductHtml(product.description),
+      nutritionProtein: product.nutritionProtein,
+      nutritionFat: product.nutritionFat,
+      nutritionCarbs: product.nutritionCarbs,
       variants,
       fromPrice: minPrice(variants),
       sortOrder: product.sortOrder,
@@ -60,6 +77,15 @@ export class ProductsService {
     return this.map(product);
   }
 
+  async getPublicBySlug(slug: string) {
+    const normalized = normalizeSlug(slug);
+    const product = await this.prisma.product.findFirst({
+      where: { slug: normalized, isActive: true },
+    });
+    if (!product) throw new NotFoundException('Товар не найден');
+    return this.map(product);
+  }
+
   private async uniqueSlug(base: string, excludeId?: string) {
     let slug = slugify(base);
     let i = 0;
@@ -78,21 +104,26 @@ export class ProductsService {
     if (!variants.length) {
       throw new BadRequestException('Добавьте хотя бы один вариант');
     }
+    const { image, images } = normalizeProductImages(dto.images, dto.image);
     const slug = await this.uniqueSlug(dto.slug || dto.name);
+    const badgeFields = resolveBadgeWrite(dto);
     const product = await this.prisma.product.create({
       data: {
         slug,
         name: dto.name.trim(),
         subtitle: (dto.subtitle ?? '').trim(),
-        image: (dto.image ?? '/assets/product-turkey.png').trim(),
+        image,
+        images,
         category: dto.category,
-        badge: dto.badge ?? ProductBadge.NONE,
-        discountPercent:
-          dto.badge === ProductBadge.SALE
-            ? (dto.discountPercent ?? null)
-            : null,
-        ingredients: (dto.ingredients ?? '').trim(),
-        additives: (dto.additives ?? '').trim(),
+        badge: badgeFields.badge,
+        badgeLabel: badgeFields.badgeLabel,
+        badgeColor: badgeFields.badgeColor,
+        discountPercent: badgeFields.discountPercent,
+        ingredients: sanitizeProductHtml(dto.ingredients),
+        description: sanitizeProductHtml(dto.description),
+        nutritionProtein: dto.nutritionProtein ?? null,
+        nutritionFat: dto.nutritionFat ?? null,
+        nutritionCarbs: dto.nutritionCarbs ?? null,
         variants: variants as unknown as Prisma.InputJsonValue,
         sortOrder: dto.sortOrder ?? 0,
         isActive: dto.isActive ?? true,
@@ -110,21 +141,30 @@ export class ProductsService {
     const slug = dto.slug
       ? await this.uniqueSlug(dto.slug, id)
       : undefined;
+    const imageData =
+      dto.images !== undefined || dto.image !== undefined
+        ? normalizeProductImages(dto.images, dto.image)
+        : null;
+    const badgeFields = resolveBadgeWrite(dto);
     const product = await this.prisma.product.update({
       where: { id },
       data: {
         ...(slug ? { slug } : {}),
         name: dto.name.trim(),
         subtitle: (dto.subtitle ?? '').trim(),
-        ...(dto.image !== undefined ? { image: dto.image.trim() } : {}),
+        ...(imageData
+          ? { image: imageData.image, images: imageData.images }
+          : {}),
         category: dto.category,
-        badge: dto.badge ?? ProductBadge.NONE,
-        discountPercent:
-          (dto.badge ?? ProductBadge.NONE) === ProductBadge.SALE
-            ? (dto.discountPercent ?? null)
-            : null,
-        ingredients: (dto.ingredients ?? '').trim(),
-        additives: (dto.additives ?? '').trim(),
+        badge: badgeFields.badge,
+        badgeLabel: badgeFields.badgeLabel,
+        badgeColor: badgeFields.badgeColor,
+        discountPercent: badgeFields.discountPercent,
+        ingredients: sanitizeProductHtml(dto.ingredients),
+        description: sanitizeProductHtml(dto.description),
+        nutritionProtein: dto.nutritionProtein ?? null,
+        nutritionFat: dto.nutritionFat ?? null,
+        nutritionCarbs: dto.nutritionCarbs ?? null,
         variants: variants as unknown as Prisma.InputJsonValue,
         sortOrder: dto.sortOrder ?? 0,
         isActive: dto.isActive ?? true,
@@ -139,19 +179,19 @@ export class ProductsService {
     return { ok: true };
   }
 
-  async setImage(id: string, imagePath: string) {
-    await this.getById(id);
+  async appendImages(id: string, imagePaths: string[]) {
+    const existing = await this.prisma.product.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Товар не найден');
+    const paths = imagePaths.map((p) => p.trim()).filter(Boolean);
+    if (!paths.length) {
+      throw new BadRequestException('Файл не получен');
+    }
+    const current = normalizeProductImages(existing.images, existing.image);
+    const images = [...current.images, ...paths];
     const product = await this.prisma.product.update({
       where: { id },
-      data: { image: imagePath },
+      data: { images, image: images[0] },
     });
     return this.map(product);
-  }
-
-  async assertCategory(value: string): Promise<ProductCategory> {
-    if (value === ProductCategory.DOGS || value === ProductCategory.CATS) {
-      return value;
-    }
-    throw new BadRequestException('Некорректная категория');
   }
 }

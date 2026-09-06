@@ -96,11 +96,17 @@ model Product {
   name             String
   subtitle         String          @default("")
   image            String
+  images           String[]        @default([])
   category         ProductCategory
   badge            ProductBadge    @default(NONE)
+  badgeLabel       String          @default("") @map("badge_label")
+  badgeColor       String          @default("") @map("badge_color")
   discountPercent  Int?            @map("discount_percent")
   ingredients      String          @default("")
-  additives        String          @default("")
+  description      String          @default("")
+  nutritionProtein Float?          @map("nutrition_protein")
+  nutritionFat     Float?          @map("nutrition_fat")
+  nutritionCarbs   Float?          @map("nutrition_carbs")
   variants         Json
   sortOrder        Int             @default(0) @map("sort_order")
   isActive         Boolean         @default(true) @map("is_active")

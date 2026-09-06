@@ -6,6 +6,7 @@ import { CDEK_FETCH, type CdekFetch } from '../../src/cdek/cdek.tokens';
 import { CdekService } from '../../src/cdek/cdek.service';
 import { YANDEX_FETCH, type YandexFetch } from '../../src/yandex/yandex.tokens';
 import { MAIL_SEND, type MailSend } from '../../src/mail/mail.tokens';
+import { GOOGLE_FETCH, type GoogleFetch } from '../../src/auth/google.tokens';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { DeliveryMethodCode } from '@prisma/client';
 
@@ -17,9 +18,11 @@ export type MockHttpCall = {
 export function applyTestDeliveryEnv(options?: {
   cdek?: 'present' | 'missing';
   yandex?: 'present' | 'missing';
+  google?: 'present' | 'missing';
 }) {
   const cdek = options?.cdek ?? 'present';
   const yandex = options?.yandex ?? 'missing';
+  const google = options?.google ?? 'missing';
 
   process.env.NODE_ENV = 'test';
   process.env.DATABASE_URL =
@@ -45,6 +48,17 @@ export function applyTestDeliveryEnv(options?: {
     process.env.YANDEX_DELIVERY_TOKEN = 'test-yandex-token';
   } else {
     process.env.YANDEX_DELIVERY_TOKEN = '';
+  }
+
+  if (google === 'present') {
+    process.env.GOOGLE_CLIENT_ID = 'test-google-client-id';
+    process.env.GOOGLE_CLIENT_SECRET = 'test-google-client-secret';
+    process.env.GOOGLE_CALLBACK_URL =
+      'http://localhost:3001/api/auth/google/callback';
+  } else {
+    process.env.GOOGLE_CLIENT_ID = '';
+    process.env.GOOGLE_CLIENT_SECRET = '';
+    process.env.GOOGLE_CALLBACK_URL = '';
   }
 }
 
@@ -90,13 +104,16 @@ export function jsonResponse(data: unknown, status = 200): Response {
 export async function createTestApp(options: {
   cdekFetch?: CdekFetch;
   yandexFetch?: YandexFetch;
+  googleFetch?: GoogleFetch;
   mailSend?: MailSend;
   cdek?: 'present' | 'missing';
   yandex?: 'present' | 'missing';
+  google?: 'present' | 'missing';
 }) {
   applyTestDeliveryEnv({
     cdek: options.cdek ?? (options.cdekFetch ? 'present' : 'missing'),
     yandex: options.yandex ?? (options.yandexFetch ? 'present' : 'missing'),
+    google: options.google ?? (options.googleFetch ? 'present' : 'missing'),
   });
 
   let builder = Test.createTestingModule({
@@ -119,6 +136,12 @@ export async function createTestApp(options: {
     builder = builder.overrideProvider(YANDEX_FETCH).useValue(async () => {
       throw new Error('Yandex fetch should not be called');
     });
+  }
+
+  if (options.googleFetch) {
+    builder = builder
+      .overrideProvider(GOOGLE_FETCH)
+      .useValue(options.googleFetch);
   }
 
   if (options.mailSend) {

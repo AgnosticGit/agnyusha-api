@@ -2,23 +2,57 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Logger,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { createRawToken, hashToken } from './auth.crypto';
+import { GOOGLE_FETCH, type GoogleFetch } from './google.tokens';
 import type { AuthUser } from './auth.types';
 
 const SESSION_DAYS = 30;
 const MIN_REQUEST_INTERVAL_MS = 60_000;
 
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
+
+type GoogleTokenResponse = {
+  access_token?: string;
+  error?: string;
+  error_description?: string;
+};
+
+type GoogleUserInfo = {
+  sub?: string;
+  email?: string;
+  email_verified?: boolean | string;
+  error?: string;
+  error_description?: string;
+};
+
+export class GoogleOAuthError extends Error {
+  constructor(
+    readonly reason: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'GoogleOAuthError';
+  }
+}
+
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     @Inject(MAIL_SEND) private readonly sendMail: MailSend,
+    @Inject(GOOGLE_FETCH) private readonly googleFetch: GoogleFetch,
   ) {}
 
   private magicLinkTtlMs(): number {
@@ -29,9 +63,87 @@ export class AuthService {
     return safe * 60_000;
   }
 
-  private webOrigin(): string {
+  webOrigin(): string {
     const cors = this.config.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
     return cors.split(',')[0]?.trim() || 'http://localhost:3000';
+  }
+
+  private googleConfig() {
+    const clientId = this.config.get<string>('GOOGLE_CLIENT_ID')?.trim() ?? '';
+    const clientSecret =
+      this.config.get<string>('GOOGLE_CLIENT_SECRET')?.trim() ?? '';
+    const callbackUrl =
+      this.config.get<string>('GOOGLE_CALLBACK_URL')?.trim() ?? '';
+    if (!clientId || !clientSecret || !callbackUrl) return null;
+    return { clientId, clientSecret, callbackUrl };
+  }
+
+  isGoogleConfigured(): boolean {
+    return this.googleConfig() !== null;
+  }
+
+  buildGoogleAuthUrl(state: string): string {
+    const cfg = this.googleConfig();
+    if (!cfg) {
+      throw new ServiceUnavailableException('Вход через Google не настроен');
+    }
+    const url = new URL(GOOGLE_AUTH_URL);
+    url.searchParams.set('client_id', cfg.clientId);
+    url.searchParams.set('redirect_uri', cfg.callbackUrl);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', 'openid email profile');
+    url.searchParams.set('state', state);
+    url.searchParams.set('prompt', 'select_account');
+    return url.toString();
+  }
+
+  private async readGoogleJson<T extends object>(
+    res: globalThis.Response,
+    step: string,
+  ): Promise<T> {
+    const text = await res.text();
+    if (!text) {
+      throw new GoogleOAuthError(
+        'google_failed',
+        `Google ${step}: empty body (${res.status})`,
+      );
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new GoogleOAuthError(
+        'google_failed',
+        `Google ${step}: invalid JSON (${res.status})`,
+      );
+    }
+  }
+
+  private async createSessionForUser(user: {
+    id: string;
+    email: string;
+    role: AuthUser['role'];
+  }): Promise<{
+    sessionToken: string;
+    user: AuthUser;
+    maxAgeMs: number;
+  }> {
+    const maxAgeMs = SESSION_DAYS * 24 * 60 * 60 * 1000;
+    const sessionToken = createRawToken();
+    const expiresAt = new Date(Date.now() + maxAgeMs);
+
+    await this.prisma.session.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(sessionToken),
+        expiresAt,
+      },
+    });
+
+    return {
+      sessionToken,
+      user: { id: user.id, email: user.email, role: user.role },
+      maxAgeMs,
+    };
   }
 
   async requestMagicLink(emailRaw: string): Promise<{ ok: true }> {
@@ -96,33 +208,103 @@ export class AuthService {
       throw new UnauthorizedException('Ссылка недействительна или устарела');
     }
 
-    const maxAgeMs = SESSION_DAYS * 24 * 60 * 60 * 1000;
-    const sessionToken = createRawToken();
-    const expiresAt = new Date(Date.now() + maxAgeMs);
+    await this.prisma.magicLink.update({
+      where: { id: magic.id },
+      data: { consumedAt: new Date() },
+    });
 
-    await this.prisma.$transaction([
-      this.prisma.magicLink.update({
-        where: { id: magic.id },
-        data: { consumedAt: new Date() },
-      }),
-      this.prisma.session.create({
-        data: {
-          userId: magic.userId,
-          tokenHash: hashToken(sessionToken),
-          expiresAt,
-        },
-      }),
-    ]);
+    return this.createSessionForUser(magic.user);
+  }
 
-    return {
-      sessionToken,
-      user: {
-        id: magic.user.id,
-        email: magic.user.email,
-        role: magic.user.role,
+  async loginWithGoogleCode(code: string): Promise<{
+    sessionToken: string;
+    user: AuthUser;
+    maxAgeMs: number;
+  }> {
+    const cfg = this.googleConfig();
+    if (!cfg) {
+      throw new ServiceUnavailableException('Вход через Google не настроен');
+    }
+    const trimmed = code.trim();
+    if (!trimmed) {
+      throw new BadRequestException('Код авторизации не получен');
+    }
+
+    const tokenBody = new URLSearchParams({
+      code: trimmed,
+      client_id: cfg.clientId,
+      client_secret: cfg.clientSecret,
+      redirect_uri: cfg.callbackUrl,
+      grant_type: 'authorization_code',
+    });
+
+    const tokenRes = await this.googleFetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenBody.toString(),
+      cache: 'no-store',
+    });
+
+    const tokenJson = await this.readGoogleJson<GoogleTokenResponse>(
+      tokenRes,
+      'token',
+    );
+    if (!tokenRes.ok || !tokenJson.access_token) {
+      this.logger.warn(
+        `Google token error: ${tokenJson.error ?? tokenRes.status} ${tokenJson.error_description ?? ''}`.trim(),
+      );
+      throw new GoogleOAuthError(
+        tokenJson.error === 'redirect_uri_mismatch'
+          ? 'google_redirect'
+          : 'google_token',
+        tokenJson.error_description ||
+          tokenJson.error ||
+          'Не удалось обменять код Google',
+      );
+    }
+
+    const profileRes = await this.googleFetch(GOOGLE_USERINFO_URL, {
+      headers: {
+        Authorization: `Bearer ${tokenJson.access_token}`,
+        Accept: 'application/json',
       },
-      maxAgeMs,
-    };
+      cache: 'no-store',
+    });
+    const profile = await this.readGoogleJson<GoogleUserInfo>(
+      profileRes,
+      'userinfo',
+    );
+    if (!profileRes.ok) {
+      this.logger.warn(
+        `Google userinfo error: ${profile.error ?? profileRes.status} ${profile.error_description ?? ''}`.trim(),
+      );
+      throw new GoogleOAuthError(
+        'google_profile',
+        profile.error_description ||
+          profile.error ||
+          'Не удалось получить профиль Google',
+      );
+    }
+
+    const email = String(profile.email ?? '')
+      .trim()
+      .toLowerCase();
+    const verified =
+      profile.email_verified === true || profile.email_verified === 'true';
+    if (!email || !verified) {
+      throw new GoogleOAuthError(
+        'google_email',
+        'Google-аккаунт без подтверждённого email',
+      );
+    }
+
+    const user = await this.prisma.user.upsert({
+      where: { email },
+      create: { email },
+      update: {},
+    });
+
+    return this.createSessionForUser(user);
   }
 
   async getUserBySessionToken(rawToken: string | undefined) {
