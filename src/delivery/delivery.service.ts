@@ -13,6 +13,11 @@ function isLocalArea(...parts: Array<string | undefined>) {
   );
 }
 
+function isMoscowArea(...parts: Array<string | undefined>) {
+  const text = parts.filter(Boolean).join(' ').toLowerCase();
+  return text.includes('москва') || text.includes('московская');
+}
+
 @Injectable()
 export class DeliveryService {
   constructor(
@@ -42,7 +47,6 @@ export class DeliveryService {
 
     const local = isLocalArea(region, label);
     const cdekReady = this.cdek.isConfigured();
-    const yandexReady = this.yandex.isConfigured();
 
     return methods.map((m) => {
       if (m.code === DeliveryMethodCode.PICKUP) {
@@ -73,12 +77,18 @@ export class DeliveryService {
         };
       }
       if (m.code === DeliveryMethodCode.YANDEX) {
+        const ready = this.yandex.isOrderCreationConfigured();
+        const moscowOnly = this.yandex.isTestEnvironment();
+        const available =
+          ready && (!moscowOnly || isMoscowArea(region, label));
         return {
           ...m,
-          available: yandexReady,
-          note: yandexReady
-            ? 'Выберите пункт выдачи Яндекс Доставки'
-            : 'Яндекс Доставка временно недоступна',
+          available,
+          note: !ready
+            ? 'Яндекс Доставка временно недоступна'
+            : moscowOnly && !isMoscowArea(region, label)
+              ? 'В тестовой среде Яндекс доступен только для Москвы'
+              : 'Выберите пункт выдачи Яндекс Доставки',
         };
       }
       return {

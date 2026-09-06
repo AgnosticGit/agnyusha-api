@@ -16,6 +16,8 @@ import { RequestMagicLinkDto, VerifyMagicLinkDto } from './dto/auth.dto';
 import {
   OAUTH_STATE_COOKIE,
   SESSION_COOKIE,
+  clearCookieOptions,
+  cookieSecure,
   createRawToken,
   sessionCookieOptions,
 } from './auth.crypto';
@@ -30,6 +32,14 @@ function rawQueryParam(req: Request, name: string): string | undefined {
   return value ?? undefined;
 }
 
+function clientIp(req: Request): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0]!.trim();
+  }
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -39,23 +49,21 @@ export class AuthController {
     private readonly config: ConfigService,
   ) {}
 
-  private isProd() {
-    return this.config.get<string>('NODE_ENV') === 'production';
+  private secureCookies() {
+    return cookieSecure(this.config);
   }
 
   private clearOAuthState(res: Response) {
-    res.clearCookie(OAUTH_STATE_COOKIE, {
-      path: '/',
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: this.isProd(),
-    });
+    res.clearCookie(OAUTH_STATE_COOKIE, clearCookieOptions(this.secureCookies()));
   }
 
   @Post('magic-link')
   @HttpCode(200)
-  async requestMagicLink(@Body() body: RequestMagicLinkDto) {
-    return this.auth.requestMagicLink(body.email);
+  async requestMagicLink(
+    @Body() body: RequestMagicLinkDto,
+    @Req() req: Request,
+  ) {
+    return this.auth.requestMagicLink(body.email, clientIp(req));
   }
 
   @Post('verify')
@@ -68,7 +76,7 @@ export class AuthController {
     res.cookie(
       SESSION_COOKIE,
       result.sessionToken,
-      sessionCookieOptions(this.isProd(), result.maxAgeMs),
+      sessionCookieOptions(this.secureCookies(), result.maxAgeMs),
     );
     return { user: result.user };
   }
@@ -88,12 +96,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     await this.auth.logout(req.cookies?.[SESSION_COOKIE]);
-    res.clearCookie(SESSION_COOKIE, {
-      path: '/',
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: this.isProd(),
-    });
+    res.clearCookie(SESSION_COOKIE, clearCookieOptions(this.secureCookies()));
     return { ok: true };
   }
 
@@ -105,7 +108,7 @@ export class AuthController {
     const state = createRawToken(24);
     res.cookie(OAUTH_STATE_COOKIE, state, {
       httpOnly: true,
-      secure: this.isProd(),
+      secure: this.secureCookies(),
       sameSite: 'lax',
       path: '/',
       maxAge: 10 * 60 * 1000,
@@ -147,7 +150,7 @@ export class AuthController {
       res.cookie(
         SESSION_COOKIE,
         result.sessionToken,
-        sessionCookieOptions(this.isProd(), result.maxAgeMs),
+        sessionCookieOptions(this.secureCookies(), result.maxAgeMs),
       );
       return res.redirect(`${web}/`);
     } catch (err) {

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Inject,
   Injectable,
   Logger,
@@ -41,6 +42,39 @@ type YandexPickupPoint = {
   payment_methods?: string[];
 };
 
+type YandexOffer = {
+  offer_id: string;
+  expires_at?: string;
+  offer_details?: {
+    pricing?: string;
+    pricing_total?: string;
+    delivery_interval?: { min?: string; max?: string; policy?: string };
+  };
+};
+
+export type YandexCreatePickupOrderInput = {
+  requestId: string;
+  pickupPointId: string;
+  phone: string;
+  recipientName: string;
+  comment?: string;
+  items: Array<{
+    name: string;
+    article: string;
+    price: number;
+    qty: number;
+    weightGrams: number;
+  }>;
+};
+
+export type YandexCreatePickupOrderResult = {
+  requestId: string;
+  offerId: string;
+  pricingTotal: string | null;
+  deliveryFrom: string | null;
+  deliveryTo: string | null;
+};
+
 const REGION_HINT =
   /область|край|республика|округ|Москва|Петербург|Севастополь/i;
 
@@ -74,6 +108,16 @@ function formatAddress(
   };
 }
 
+function normalizeRuPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('8')) {
+    return `7${digits.slice(1)}`;
+  }
+  if (digits.length === 11 && digits.startsWith('7')) return digits;
+  if (digits.length === 10) return `7${digits}`;
+  return digits;
+}
+
 @Injectable()
 export class YandexDeliveryService {
   private readonly logger = new Logger(YandexDeliveryService.name);
@@ -94,8 +138,23 @@ export class YandexDeliveryService {
     return this.config.get<string>('YANDEX_DELIVERY_TOKEN')?.trim() || '';
   }
 
+  private get platformStationId() {
+    return (
+      this.config.get<string>('YANDEX_PLATFORM_STATION_ID')?.trim() || ''
+    );
+  }
+
   isConfigured() {
     return Boolean(this.token);
+  }
+
+  isOrderCreationConfigured() {
+    return Boolean(this.token && this.platformStationId);
+  }
+
+  /** Test host only supports Moscow addresses. */
+  isTestEnvironment() {
+    return this.baseUrl.includes('tst.yandex.net');
   }
 
   private assertConfigured() {
@@ -103,6 +162,15 @@ export class YandexDeliveryService {
       throw new ServiceUnavailableException(
         'Служба доставки временно недоступна',
       );
+    }
+  }
+
+  private async readErrorBody(res: Response): Promise<string> {
+    try {
+      const text = await res.text();
+      return text.slice(0, 400);
+    } catch {
+      return '';
     }
   }
 
@@ -117,15 +185,21 @@ export class YandexDeliveryService {
       headers: {
         Authorization: `Bearer ${this.token}`,
         Accept: 'application/json',
-        ...(init.body
-          ? { 'Content-Type': 'application/json' }
-          : undefined),
+        ...(init.body ? { 'Content-Type': 'application/json' } : undefined),
       },
       body: init.body ? JSON.stringify(init.body) : undefined,
     });
 
     if (!res.ok) {
-      this.logger.error(`Yandex ${path} failed with status ${res.status}`);
+      const detail = await this.readErrorBody(res);
+      this.logger.error(
+        `Yandex ${path} failed with status ${res.status}${detail ? `: ${detail}` : ''}`,
+      );
+      if (res.status >= 400 && res.status < 500) {
+        throw new BadRequestException(
+          'Не удалось оформить доставку Яндекс. Проверьте город и пункт выдачи.',
+        );
+      }
       throw new ServiceUnavailableException(
         'Служба доставки временно недоступна',
       );
@@ -195,5 +269,116 @@ export class YandexDeliveryService {
         label: [name, address.full].filter(Boolean).join(' — '),
       };
     });
+  }
+
+  async createPickupOrder(
+    input: YandexCreatePickupOrderInput,
+  ): Promise<YandexCreatePickupOrderResult> {
+    if (!this.isOrderCreationConfigured()) {
+      throw new ServiceUnavailableException(
+        'Оформление через Яндекс Доставку временно недоступно',
+      );
+    }
+
+    const pickupPointId = input.pickupPointId.trim();
+    if (!pickupPointId) {
+      throw new BadRequestException('Не выбран пункт выдачи Яндекс');
+    }
+
+    const phone = normalizeRuPhone(input.phone);
+    if (phone.length < 11) {
+      throw new BadRequestException('Укажите корректный телефон получателя');
+    }
+
+    const totalWeight = Math.max(
+      100,
+      input.items.reduce((s, i) => s + i.weightGrams * i.qty, 0),
+    );
+    const barcode = `BOX-${input.requestId}`.slice(0, 40);
+
+    const offerBody = {
+      info: {
+        operator_request_id: input.requestId.slice(0, 64),
+        comment: (input.comment || 'Заказ Агнюша').slice(0, 200),
+      },
+      source: {
+        platform_station: {
+          platform_id: this.platformStationId,
+        },
+      },
+      destination: {
+        type: 'platform_station',
+        platform_station: {
+          platform_id: pickupPointId,
+        },
+      },
+      last_mile_policy: 'self_pickup',
+      items: input.items.map((item, index) => ({
+        count: item.qty,
+        name: item.name.slice(0, 128),
+        article: (item.article || `SKU-${index + 1}`).slice(0, 64),
+        billing_details: {
+          unit_price: item.price,
+          assessed_unit_price: item.price,
+        },
+        physical_dims: {
+          dx: 20,
+          dy: 15,
+          dz: 10,
+          weight_gross: Math.max(100, item.weightGrams),
+        },
+        place_barcode: barcode,
+      })),
+      places: [
+        {
+          physical_dims: {
+            dx: 20,
+            dy: 15,
+            dz: 10,
+            weight_gross: totalWeight,
+          },
+          barcode,
+          description: 'Коробка с кормом Агнюша',
+        },
+      ],
+      billing_info: {
+        payment_method: 'already_paid',
+      },
+      recipient_info: {
+        first_name: (input.recipientName || 'Покупатель').slice(0, 64),
+        phone,
+      },
+    };
+
+    const offersResponse = await this.yandexRequest<{ offers?: YandexOffer[] }>(
+      '/api/b2b/platform/offers/create',
+      { method: 'POST', body: offerBody },
+    );
+
+    const offer = offersResponse.offers?.[0];
+    if (!offer?.offer_id) {
+      throw new ServiceUnavailableException(
+        'Яндекс Доставка не вернула доступный тариф',
+      );
+    }
+
+    const confirmed = await this.yandexRequest<{ request_id?: string }>(
+      '/api/b2b/platform/offers/confirm',
+      { method: 'POST', body: { offer_id: offer.offer_id } },
+    );
+
+    if (!confirmed.request_id) {
+      throw new ServiceUnavailableException(
+        'Не удалось подтвердить заявку Яндекс Доставки',
+      );
+    }
+
+    return {
+      requestId: confirmed.request_id,
+      offerId: offer.offer_id,
+      pricingTotal: offer.offer_details?.pricing_total ?? null,
+      deliveryFrom: offer.offer_details?.delivery_interval?.min ?? null,
+      deliveryTo: offer.offer_details?.delivery_interval?.max ?? null,
+    };
   }
 }

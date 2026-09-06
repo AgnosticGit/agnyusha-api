@@ -60,6 +60,10 @@ export class CreateOrderDto {
   @IsString()
   pickupLabel?: string;
 
+  @IsOptional()
+  @IsString()
+  pickupCode?: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

@@ -1,5 +1,12 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { UserRole } from '@prisma/client';
+import {
+  createRawToken,
+  hashToken,
+  SESSION_COOKIE,
+} from '../src/auth/auth.crypto';
+import { PrismaService } from '../src/prisma/prisma.service';
 import {
   createMockYandexFetch,
   createTestApp,
@@ -50,6 +57,30 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
               payment_methods: ['already_paid', 'card_on_receipt'],
             },
           ],
+        });
+      }
+
+      if (url.includes('/offers/create') && method === 'POST') {
+        return jsonResponse({
+          offers: [
+            {
+              offer_id: 'offer-test-1',
+              offer_details: {
+                pricing_total: '181.82 RUB',
+                delivery_interval: {
+                  min: '2026-09-08T07:00:00Z',
+                  max: '2026-09-08T09:00:00Z',
+                  policy: 'self_pickup',
+                },
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.includes('/offers/confirm') && method === 'POST') {
+        return jsonResponse({
+          request_id: 'yandex-request-test-1',
         });
       }
 
@@ -124,6 +155,65 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
     );
     expect(byCode.YANDEX).toBe(true);
     expect(byCode.CDEK).toBe(false);
+  });
+
+  it('hides Yandex outside Moscow on test host', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/delivery-methods')
+      .query({ region: 'Санкт-Петербург', label: 'Санкт-Петербург' })
+      .expect(200);
+
+    const yandex = res.body.find(
+      (m: { code: string }) => m.code === 'YANDEX',
+    ) as { available: boolean; note: string };
+    expect(yandex.available).toBe(false);
+    expect(yandex.note).toMatch(/Москв/i);
+  });
+
+  it('creates local order with Yandex external delivery id', async () => {
+    const prisma = app.get(PrismaService);
+    const email = 'yandex-buyer@example.com';
+    const user = await prisma.user.upsert({
+      where: { email },
+      create: { email, role: UserRole.USER },
+      update: { role: UserRole.USER },
+    });
+    const raw = createRawToken();
+    await prisma.session.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(raw),
+        expiresAt: new Date(Date.now() + 86400000),
+      },
+    });
+
+    const order = await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+      .send({
+        phone: '+7 (900) 123-45-67',
+        contactChannel: 'Telegram',
+        cityLabel: 'Москва',
+        deliveryCode: 'YANDEX',
+        deliveryTitle: 'Яндекс Доставка',
+        pickupLabel: 'Яндекс ПВЗ — Ленинградский 37',
+        pickupCode: '01946f4f013c7337874ec2fb848a58a4',
+        items: [
+          {
+            name: 'Корм тест',
+            image: '/assets/product-turkey.png',
+            weight: '0,8 кг.',
+            price: 725,
+            qty: 1,
+          },
+        ],
+      })
+      .expect(201);
+
+    expect(order.body.externalDeliveryId).toBe('yandex-request-test-1');
+    expect(order.body.pickupCode).toBe('01946f4f013c7337874ec2fb848a58a4');
+    expect(calls.some((c) => c.url.includes('/offers/create'))).toBe(true);
+    expect(calls.some((c) => c.url.includes('/offers/confirm'))).toBe(true);
   });
 
   it('returns generic 503 when Yandex token is missing', async () => {

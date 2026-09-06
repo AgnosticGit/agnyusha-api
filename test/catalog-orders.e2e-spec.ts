@@ -118,6 +118,31 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(xss.body.description).toContain('<strong>текст</strong>');
     expect(xss.body.description).not.toMatch(/script|onerror|img/i);
 
+    const customBadge = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Кастомный бейдж',
+        category: 'CATS',
+        variants: [{ weight: '1 кг.', price: 700 }],
+        badgeLabel: 'Акция',
+        badgeColor: '#c45c26',
+        ingredients:
+          '<p>Рис</p><script>alert(1)</script>',
+        description: '<p>Ок</p>',
+      })
+      .expect(201);
+
+    expect(customBadge.body.badgeLabel).toBe('Акция');
+    expect(customBadge.body.badgeColor).toBe('#c45c26');
+    expect(customBadge.body.ingredients).toContain('<p>Рис</p>');
+    expect(customBadge.body.ingredients).not.toMatch(/script/i);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${customBadge.body.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
     await request(app.getHttpServer())
       .delete(`/api/admin/products/${xss.body.id}`)
       .set('Cookie', admin.cookie)
@@ -230,5 +255,122 @@ describe('Catalog admin & orders (e2e)', () => {
       .expect(200);
 
     expect(updated.body.role).toBe('ADMIN');
+  });
+
+  it('admin can search and paginate users', async () => {
+    const admin = await loginAs(
+      app,
+      'agnostex@gmail.com',
+      UserRole.ADMIN,
+    );
+    const prisma = app.get(PrismaService);
+
+    for (let i = 0; i < 5; i++) {
+      await prisma.user.upsert({
+        where: { email: `page-user-${i}@example.com` },
+        create: { email: `page-user-${i}@example.com`, role: UserRole.USER },
+        update: {},
+      });
+    }
+    await prisma.user.upsert({
+      where: { email: 'unique-search-target@example.com' },
+      create: {
+        email: 'unique-search-target@example.com',
+        role: UserRole.USER,
+      },
+      update: {},
+    });
+
+    const listed = await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .query({ page: 1, limit: 2 })
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
+    expect(listed.body.items).toHaveLength(2);
+    expect(listed.body.page).toBe(1);
+    expect(listed.body.limit).toBe(2);
+    expect(listed.body.total).toBeGreaterThanOrEqual(6);
+
+    const page2 = await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .query({ page: 2, limit: 2 })
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
+    expect(page2.body.items).toHaveLength(2);
+    expect(page2.body.page).toBe(2);
+    expect(page2.body.items[0].id).not.toBe(listed.body.items[0].id);
+
+    const found = await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .query({ q: 'unique-search-target', page: 1, limit: 20 })
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
+    expect(found.body.total).toBe(1);
+    expect(found.body.items).toHaveLength(1);
+    expect(found.body.items[0].email).toBe('unique-search-target@example.com');
+
+    const empty = await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .query({ q: 'no-such-user-zzz', page: 1, limit: 20 })
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
+    expect(empty.body.total).toBe(0);
+    expect(empty.body.items).toEqual([]);
+  });
+
+  it('admin can ban and delete user', async () => {
+    const admin = await loginAs(
+      app,
+      'agnostex@gmail.com',
+      UserRole.ADMIN,
+    );
+    const target = await loginAs(app, 'ban-me@example.com', UserRole.USER);
+    const prisma = app.get(PrismaService);
+
+    const banned = await request(app.getHttpServer())
+      .patch(`/api/admin/users/${target.user.id}/ban`)
+      .set('Cookie', admin.cookie)
+      .send({ banned: true })
+      .expect(200);
+
+    expect(banned.body.bannedAt).toBeTruthy();
+
+    const meWhileBanned = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Cookie', target.cookie)
+      .expect(200);
+    expect(meWhileBanned.body.user).toBeNull();
+
+    const unbanned = await request(app.getHttpServer())
+      .patch(`/api/admin/users/${target.user.id}/ban`)
+      .set('Cookie', admin.cookie)
+      .send({ banned: false })
+      .expect(200);
+    expect(unbanned.body.bannedAt).toBeNull();
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/users/${target.user.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
+    const gone = await prisma.user.findUnique({
+      where: { id: target.user.id },
+    });
+    expect(gone).toBeNull();
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${admin.user.id}/ban`)
+      .set('Cookie', admin.cookie)
+      .send({ banned: true })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/users/${admin.user.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(403);
   });
 });

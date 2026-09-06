@@ -1,5 +1,8 @@
 import {
   BadRequestException,
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -12,9 +15,16 @@ import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { createRawToken, hashToken } from './auth.crypto';
 import { GOOGLE_FETCH, type GoogleFetch } from './google.tokens';
 import type { AuthUser } from './auth.types';
+import { SlidingWindowRateLimiter } from '../common/rate-limit';
 
 const SESSION_DAYS = 30;
 const MIN_REQUEST_INTERVAL_MS = 60_000;
+/** Max magic-link requests per IP per minute (abuse / email bombing). */
+const MAGIC_LINK_IP_LIMIT = Number(
+  process.env.MAGIC_LINK_IP_LIMIT ??
+    (process.env.NODE_ENV === 'test' ? '200' : '20'),
+);
+const MAGIC_LINK_IP_WINDOW_MS = 60_000;
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -47,6 +57,10 @@ export class GoogleOAuthError extends Error {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly magicLinkIpLimiter = new SlidingWindowRateLimiter(
+    MAGIC_LINK_IP_LIMIT,
+    MAGIC_LINK_IP_WINDOW_MS,
+  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -122,11 +136,16 @@ export class AuthService {
     id: string;
     email: string;
     role: AuthUser['role'];
+    bannedAt?: Date | null;
   }): Promise<{
     sessionToken: string;
     user: AuthUser;
     maxAgeMs: number;
   }> {
+    if (user.bannedAt) {
+      throw new ForbiddenException('Аккаунт заблокирован');
+    }
+
     const maxAgeMs = SESSION_DAYS * 24 * 60 * 60 * 1000;
     const sessionToken = createRawToken();
     const expiresAt = new Date(Date.now() + maxAgeMs);
@@ -146,7 +165,17 @@ export class AuthService {
     };
   }
 
-  async requestMagicLink(emailRaw: string): Promise<{ ok: true }> {
+  async requestMagicLink(
+    emailRaw: string,
+    clientIp = 'unknown',
+  ): Promise<{ ok: true }> {
+    if (!this.magicLinkIpLimiter.tryConsume(clientIp || 'unknown')) {
+      throw new HttpException(
+        'Слишком много запросов. Попробуйте позже.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const email = emailRaw.trim().toLowerCase();
     if (!email) {
       throw new BadRequestException('Укажите email');
@@ -157,6 +186,11 @@ export class AuthService {
       create: { email },
       update: {},
     });
+
+    // Don't reveal ban status; silently no-op for banned accounts.
+    if (user.bannedAt) {
+      return { ok: true };
+    }
 
     const recent = await this.prisma.magicLink.findFirst({
       where: {
@@ -171,14 +205,21 @@ export class AuthService {
 
     const rawToken = createRawToken();
     const expiresAt = new Date(Date.now() + this.magicLinkTtlMs());
+    const now = new Date();
 
-    await this.prisma.magicLink.create({
-      data: {
-        userId: user.id,
-        tokenHash: hashToken(rawToken),
-        expiresAt,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.magicLink.updateMany({
+        where: { userId: user.id, consumedAt: null },
+        data: { consumedAt: now },
+      }),
+      this.prisma.magicLink.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashToken(rawToken),
+          expiresAt,
+        },
+      }),
+    ]);
 
     const link = `${this.webOrigin()}/auth/callback?token=${encodeURIComponent(rawToken)}`;
     const minutes = Math.round(this.magicLinkTtlMs() / 60_000);
@@ -199,18 +240,32 @@ export class AuthService {
     maxAgeMs: number;
   }> {
     const tokenHash = hashToken(rawToken.trim());
-    const magic = await this.prisma.magicLink.findFirst({
-      where: { tokenHash, consumedAt: null },
-      include: { user: true },
+    const now = new Date();
+
+    const consumed = await this.prisma.magicLink.updateMany({
+      where: {
+        tokenHash,
+        consumedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: { consumedAt: now },
     });
 
-    if (!magic || magic.expiresAt.getTime() < Date.now()) {
+    if (consumed.count !== 1) {
       throw new UnauthorizedException('Ссылка недействительна или устарела');
     }
 
-    await this.prisma.magicLink.update({
-      where: { id: magic.id },
-      data: { consumedAt: new Date() },
+    const magic = await this.prisma.magicLink.findFirst({
+      where: { tokenHash },
+      include: { user: true },
+    });
+    if (!magic) {
+      throw new UnauthorizedException('Ссылка недействительна или устарела');
+    }
+
+    await this.prisma.magicLink.updateMany({
+      where: { userId: magic.userId, consumedAt: null },
+      data: { consumedAt: now },
     });
 
     return this.createSessionForUser(magic.user);
@@ -309,11 +364,20 @@ export class AuthService {
 
   async getUserBySessionToken(rawToken: string | undefined) {
     if (!rawToken) return null;
+    const tokenHash = hashToken(rawToken);
     const session = await this.prisma.session.findUnique({
-      where: { tokenHash: hashToken(rawToken) },
+      where: { tokenHash },
       include: { user: true },
     });
-    if (!session || session.expiresAt.getTime() < Date.now()) return null;
+    if (!session) return null;
+    if (session.expiresAt.getTime() < Date.now()) {
+      await this.prisma.session.deleteMany({ where: { tokenHash } });
+      return null;
+    }
+    if (session.user.bannedAt) {
+      await this.prisma.session.deleteMany({ where: { userId: session.userId } });
+      return null;
+    }
     return {
       id: session.user.id,
       email: session.user.email,

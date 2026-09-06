@@ -1,12 +1,69 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { DeliveryMethodCode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
+
+function estimateWeightGrams(weight: string): number {
+  const normalized = weight.replace(',', '.').toLowerCase();
+  const match = normalized.match(/(\d+(?:\.\d+)?)/);
+  if (!match) return 800;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return 800;
+  if (/г(?!\w)|g\b/.test(normalized) && !/кг|kg/.test(normalized)) {
+    return Math.max(100, Math.round(value));
+  }
+  // Treat bare numbers and "кг" as kilograms.
+  return Math.max(100, Math.round(value * 1000));
+}
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly yandex: YandexDeliveryService,
+  ) {}
 
   async create(userId: string, dto: CreateOrderDto) {
+    const deliveryCode = dto.deliveryCode.trim().toUpperCase();
+    const pickupCode = dto.pickupCode?.trim() || null;
+    let externalDeliveryId: string | null = null;
+
+    if (deliveryCode === DeliveryMethodCode.YANDEX) {
+      if (!pickupCode) {
+        throw new BadRequestException('Выберите пункт выдачи Яндекс');
+      }
+      if (!this.yandex.isOrderCreationConfigured()) {
+        throw new BadRequestException(
+          'Оформление через Яндекс Доставку временно недоступно',
+        );
+      }
+
+      const operatorRequestId = `agny-${Date.now().toString(36)}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+
+      const yandexOrder = await this.yandex.createPickupOrder({
+        requestId: operatorRequestId,
+        pickupPointId: pickupCode,
+        phone: dto.phone,
+        recipientName: 'Покупатель',
+        comment: `Заказ Агнюша · ${dto.cityLabel}`,
+        items: dto.items.map((item, index) => ({
+          name: item.name,
+          article: item.productId || `SKU-${index + 1}`,
+          price: item.price,
+          qty: item.qty,
+          weightGrams: estimateWeightGrams(item.weight),
+        })),
+      });
+      externalDeliveryId = yandexOrder.requestId;
+    }
+
     const total = dto.items.reduce((s, i) => s + i.price * i.qty, 0);
     const order = await this.prisma.order.create({
       data: {
@@ -14,9 +71,11 @@ export class OrdersService {
         phone: dto.phone.trim(),
         contactChannel: dto.contactChannel.trim(),
         cityLabel: dto.cityLabel.trim(),
-        deliveryCode: dto.deliveryCode.trim(),
+        deliveryCode,
         deliveryTitle: dto.deliveryTitle.trim(),
         pickupLabel: dto.pickupLabel?.trim() || null,
+        pickupCode,
+        externalDeliveryId,
         total,
         items: {
           create: dto.items.map((item) => ({
@@ -61,6 +120,8 @@ export class OrdersService {
     deliveryCode: string;
     deliveryTitle: string;
     pickupLabel: string | null;
+    pickupCode?: string | null;
+    externalDeliveryId?: string | null;
     total: number;
     createdAt: Date;
     items: Array<{
@@ -82,6 +143,8 @@ export class OrdersService {
       deliveryCode: order.deliveryCode,
       deliveryTitle: order.deliveryTitle,
       pickupLabel: order.pickupLabel,
+      pickupCode: order.pickupCode ?? null,
+      externalDeliveryId: order.externalDeliveryId ?? null,
       total: order.total,
       createdAt: order.createdAt,
       items: order.items.map((i) => ({

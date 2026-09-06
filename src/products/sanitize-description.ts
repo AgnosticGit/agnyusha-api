@@ -61,6 +61,3 @@ export function sanitizeProductHtml(raw: string | null | undefined): string {
 
   return filter.process(html).trim();
 }
-
-/** @deprecated Use sanitizeProductHtml */
-export const sanitizeProductDescription = sanitizeProductHtml;

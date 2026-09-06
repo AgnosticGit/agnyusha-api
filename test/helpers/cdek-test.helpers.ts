@@ -9,6 +9,7 @@ import { MAIL_SEND, type MailSend } from '../../src/mail/mail.tokens';
 import { GOOGLE_FETCH, type GoogleFetch } from '../../src/auth/google.tokens';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { DeliveryMethodCode } from '@prisma/client';
+import { createOriginGuard } from '../../src/common/origin.guard';
 
 export type MockHttpCall = {
   url: string;
@@ -46,8 +47,11 @@ export function applyTestDeliveryEnv(options?: {
 
   if (yandex === 'present') {
     process.env.YANDEX_DELIVERY_TOKEN = 'test-yandex-token';
+    process.env.YANDEX_PLATFORM_STATION_ID =
+      'fbed3aa1-2cc6-4370-ab4d-59c5cc9bb924';
   } else {
     process.env.YANDEX_DELIVERY_TOKEN = '';
+    process.env.YANDEX_PLATFORM_STATION_ID = '';
   }
 
   if (google === 'present') {
@@ -152,9 +156,17 @@ export async function createTestApp(options: {
   const app = moduleFixture.createNestApplication();
   app.use(cookieParser());
   app.setGlobalPrefix('api');
+  app.use(
+    createOriginGuard(
+      (process.env.CORS_ORIGIN ?? 'http://localhost:3000')
+        .split(',')
+        .map((o) => o.trim()),
+    ),
+  );
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
+      forbidNonWhitelisted: true,
       transform: true,
       transformOptions: { enableImplicitConversion: true },
     }),
@@ -166,11 +178,6 @@ export async function createTestApp(options: {
   }
 
   return { app, moduleFixture };
-}
-
-/** @deprecated use createTestApp */
-export async function createAppWithMockCdek(fetchMock: CdekFetch) {
-  return createTestApp({ cdekFetch: fetchMock, cdek: 'present', yandex: 'missing' });
 }
 
 export async function ensureDeliveryMethods(app: INestApplication) {

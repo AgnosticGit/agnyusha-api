@@ -56,6 +56,7 @@ model User {
   id         String      @id @default(cuid())
   email      String      @unique
   role       UserRole    @default(USER)
+  bannedAt   DateTime?   @map("banned_at")
   createdAt  DateTime    @default(now()) @map("created_at")
   magicLinks MagicLink[]
   sessions   Session[]
@@ -119,19 +120,21 @@ model Product {
 }
 
 model Order {
-  id               String      @id @default(cuid())
-  userId           String      @map("user_id")
-  status           OrderStatus @default(NEW)
-  phone            String
-  contactChannel   String      @map("contact_channel")
-  cityLabel        String      @map("city_label")
-  deliveryCode     String      @map("delivery_code")
-  deliveryTitle    String      @map("delivery_title")
-  pickupLabel      String?     @map("pickup_label")
-  total            Int
-  createdAt        DateTime    @default(now()) @map("created_at")
-  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items            OrderItem[]
+  id                 String      @id @default(cuid())
+  userId             String      @map("user_id")
+  status             OrderStatus @default(NEW)
+  phone              String
+  contactChannel     String      @map("contact_channel")
+  cityLabel          String      @map("city_label")
+  deliveryCode       String      @map("delivery_code")
+  deliveryTitle      String      @map("delivery_title")
+  pickupLabel        String?     @map("pickup_label")
+  pickupCode         String?     @map("pickup_code")
+  externalDeliveryId String?     @map("external_delivery_id")
+  total              Int
+  createdAt          DateTime    @default(now()) @map("created_at")
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items              OrderItem[]
 
   @@index([userId, createdAt])
   @@map("orders")
