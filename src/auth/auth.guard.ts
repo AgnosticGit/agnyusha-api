@@ -27,6 +27,20 @@ export const RequirePermissions = (...permissions: StaffPermission[]) =>
   SetMetadata(PERMISSIONS_KEY, permissions);
 
 @Injectable()
+export class OptionalAuthGuard implements CanActivate {
+  constructor(private readonly auth: AuthService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<AuthedRequest>();
+    const user = await this.auth.getUserBySessionToken(
+      req.cookies?.[SESSION_COOKIE],
+    );
+    if (user) req.user = user;
+    return true;
+  }
+}
+
+@Injectable()
 export class AuthGuard implements CanActivate {
   constructor(private readonly auth: AuthService) {}
 

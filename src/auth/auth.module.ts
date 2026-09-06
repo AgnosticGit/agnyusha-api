@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MailModule } from '../mail/mail.module';
+import { CartModule } from '../cart/cart.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import {
@@ -7,6 +8,7 @@ import {
   AnalyticsAccessGuard,
   AuthGuard,
   ManageUsersGuard,
+  OptionalAuthGuard,
   PermissionsGuard,
   ProductsAccessGuard,
   StaffGuard,
@@ -14,11 +16,12 @@ import {
 import { GOOGLE_FETCH } from './google.tokens';
 
 @Module({
-  imports: [MailModule],
+  imports: [MailModule, forwardRef(() => CartModule)],
   controllers: [AuthController],
   providers: [
     AuthService,
     AuthGuard,
+    OptionalAuthGuard,
     AdminGuard,
     StaffGuard,
     ManageUsersGuard,
@@ -33,6 +36,7 @@ import { GOOGLE_FETCH } from './google.tokens';
   exports: [
     AuthService,
     AuthGuard,
+    OptionalAuthGuard,
     AdminGuard,
     StaffGuard,
     ManageUsersGuard,

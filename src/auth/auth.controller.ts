@@ -14,13 +14,16 @@ import { ConfigService } from '@nestjs/config';
 import { AuthService, GoogleOAuthError } from './auth.service';
 import { RequestMagicLinkDto, VerifyMagicLinkDto } from './dto/auth.dto';
 import {
+  CART_COOKIE,
   OAUTH_STATE_COOKIE,
   SESSION_COOKIE,
   clearCookieOptions,
+  cookieSameSite,
   cookieSecure,
   createRawToken,
   sessionCookieOptions,
 } from './auth.crypto';
+import { CartService } from '../cart/cart.service';
 
 /** Avoid Express query parser turning `+` into space (breaks Google auth codes). */
 function rawQueryParam(req: Request, name: string): string | undefined {
@@ -47,14 +50,22 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly config: ConfigService,
+    private readonly cart: CartService,
   ) {}
 
   private secureCookies() {
     return cookieSecure(this.config);
   }
 
+  private sameSite() {
+    return cookieSameSite(this.config);
+  }
+
   private clearOAuthState(res: Response) {
-    res.clearCookie(OAUTH_STATE_COOKIE, clearCookieOptions(this.secureCookies()));
+    res.clearCookie(
+      OAUTH_STATE_COOKIE,
+      clearCookieOptions(this.secureCookies(), this.sameSite()),
+    );
   }
 
   @Post('magic-link')
@@ -70,15 +81,25 @@ export class AuthController {
   @HttpCode(200)
   async verify(
     @Body() body: VerifyMagicLinkDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.auth.verifyMagicLink(body.token);
     res.cookie(
       SESSION_COOKIE,
       result.sessionToken,
-      sessionCookieOptions(this.secureCookies(), result.maxAgeMs),
+      sessionCookieOptions(
+        this.secureCookies(),
+        result.maxAgeMs,
+        this.sameSite(),
+      ),
     );
-    return { user: result.user };
+    const cart = await this.cart.mergeGuestIntoUser(
+      result.user.id,
+      req.cookies?.[CART_COOKIE],
+      res,
+    );
+    return { user: result.user, cart };
   }
 
   @Get('me')
@@ -96,7 +117,10 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     await this.auth.logout(req.cookies?.[SESSION_COOKIE]);
-    res.clearCookie(SESSION_COOKIE, clearCookieOptions(this.secureCookies()));
+    res.clearCookie(
+      SESSION_COOKIE,
+      clearCookieOptions(this.secureCookies(), this.sameSite()),
+    );
     return { ok: true };
   }
 
@@ -108,8 +132,8 @@ export class AuthController {
     const state = createRawToken(24);
     res.cookie(OAUTH_STATE_COOKIE, state, {
       httpOnly: true,
-      secure: this.secureCookies(),
-      sameSite: 'lax',
+      secure: this.sameSite() === 'none' ? true : this.secureCookies(),
+      sameSite: this.sameSite(),
       path: '/',
       maxAge: 10 * 60 * 1000,
     });
@@ -150,7 +174,16 @@ export class AuthController {
       res.cookie(
         SESSION_COOKIE,
         result.sessionToken,
-        sessionCookieOptions(this.secureCookies(), result.maxAgeMs),
+        sessionCookieOptions(
+          this.secureCookies(),
+          result.maxAgeMs,
+          this.sameSite(),
+        ),
+      );
+      await this.cart.mergeGuestIntoUser(
+        result.user.id,
+        req.cookies?.[CART_COOKIE],
+        res,
       );
       return res.redirect(`${web}/`);
     } catch (err) {
