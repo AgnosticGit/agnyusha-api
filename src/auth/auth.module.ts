@@ -4,14 +4,12 @@ import { CartModule } from '../cart/cart.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import {
-  AdminGuard,
   AnalyticsAccessGuard,
   AuthGuard,
   ManageUsersGuard,
   OptionalAuthGuard,
   PermissionsGuard,
   ProductsAccessGuard,
-  StaffGuard,
 } from './auth.guard';
 import { GOOGLE_FETCH } from './google.tokens';
 
@@ -22,8 +20,6 @@ import { GOOGLE_FETCH } from './google.tokens';
     AuthService,
     AuthGuard,
     OptionalAuthGuard,
-    AdminGuard,
-    StaffGuard,
     ManageUsersGuard,
     PermissionsGuard,
     ProductsAccessGuard,
@@ -37,8 +33,6 @@ import { GOOGLE_FETCH } from './google.tokens';
     AuthService,
     AuthGuard,
     OptionalAuthGuard,
-    AdminGuard,
-    StaffGuard,
     ManageUsersGuard,
     PermissionsGuard,
     ProductsAccessGuard,

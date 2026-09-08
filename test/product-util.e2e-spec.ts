@@ -17,7 +17,7 @@ describe('parseVariantInputs', () => {
         id: 'v1',
         sku: 'AGN-1',
         weight: '1 кг.',
-        price: 501,
+        price: 500.6,
         stock: 3,
         sortOrder: 0,
       },

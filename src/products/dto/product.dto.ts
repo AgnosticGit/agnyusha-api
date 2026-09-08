@@ -26,7 +26,7 @@ export class ProductVariantInput {
   @MinLength(1)
   weight!: string;
 
-  @IsInt()
+  @IsNumber()
   @Min(0)
   price!: number;
 

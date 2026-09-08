@@ -251,10 +251,27 @@ export class YandexDeliveryService {
       },
     });
 
-    return (data.points || []).map((p) => {
+    const seen = new Set<string>();
+    const points: Array<{
+      code: string;
+      name: string;
+      type: string;
+      address: string;
+      city: string;
+      region: string;
+      postalCode: string | null;
+      workTime: string | null;
+      latitude: number | null;
+      longitude: number | null;
+      paymentMethods: string[];
+      label: string;
+    }> = [];
+    for (const p of data.points || []) {
+      if (!p.id || seen.has(p.id)) continue;
+      seen.add(p.id);
       const address = formatAddress(p.address);
       const name = p.name || address.full || p.id;
-      return {
+      points.push({
         code: p.id,
         name,
         type: p.type || 'pickup_point',
@@ -262,13 +279,14 @@ export class YandexDeliveryService {
         city: address.city,
         region: address.region,
         postalCode: address.postalCode,
-        workTime: null as string | null,
+        workTime: null,
         latitude: p.position?.latitude ?? null,
         longitude: p.position?.longitude ?? null,
         paymentMethods: p.payment_methods || [],
         label: [name, address.full].filter(Boolean).join(' — '),
-      };
-    });
+      });
+    }
+    return points;
   }
 
   async createPickupOrder(

@@ -17,30 +17,36 @@ const ROOT_ADMIN_EMAIL = 'agnostex@gmail.com';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async mapUser(user: {
-    id: string;
-    email: string;
-    role: UserRole;
-    bannedAt: Date | null;
-    createdAt: Date;
-  }) {
-    const permissions =
-      user.role === UserRole.USER || user.role === UserRole.ADMIN
-        ? []
-        : (
-            await this.prisma.userPermission.findMany({
-              where: { userId: user.id },
-              select: { permission: true },
-            })
-          ).map((p) => p.permission);
+  private async permissionsFor(userId: string, role: UserRole) {
+    if (role === UserRole.USER || role === UserRole.ADMIN) return [];
+    return (
+      await this.prisma.userPermission.findMany({
+        where: { userId },
+        select: { permission: true },
+      })
+    ).map((p) => p.permission);
+  }
 
+  private mapUser(
+    user: {
+      id: string;
+      email: string;
+      role: UserRole;
+      bannedAt: Date | null;
+      createdAt: Date;
+    },
+    permissions: StaffPermission[],
+  ) {
     return {
       id: user.id,
       email: user.email,
       role: user.role,
       bannedAt: user.bannedAt,
       createdAt: user.createdAt,
-      permissions,
+      permissions:
+        user.role === UserRole.USER || user.role === UserRole.ADMIN
+          ? []
+          : permissions,
     };
   }
 
@@ -74,7 +80,28 @@ export class UsersService {
       this.prisma.user.count({ where }),
     ]);
 
-    const items = await Promise.all(rows.map((u) => this.mapUser(u)));
+    const staffIds = rows
+      .filter((u) => u.role === UserRole.STAFF || u.role === UserRole.MANAGER)
+      .map((u) => u.id);
+
+    const permissionRows =
+      staffIds.length === 0
+        ? []
+        : await this.prisma.userPermission.findMany({
+            where: { userId: { in: staffIds } },
+            select: { userId: true, permission: true },
+          });
+
+    const permsByUser = new Map<string, StaffPermission[]>();
+    for (const row of permissionRows) {
+      const list = permsByUser.get(row.userId) ?? [];
+      list.push(row.permission);
+      permsByUser.set(row.userId, list);
+    }
+
+    const items = rows.map((u) =>
+      this.mapUser(u, permsByUser.get(u.id) ?? []),
+    );
     return { items, total, page, limit };
   }
 
@@ -132,7 +159,10 @@ export class UsersService {
     const updated = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
     });
-    return this.mapUser(updated);
+    return this.mapUser(
+      updated,
+      await this.permissionsFor(updated.id, updated.role),
+    );
   }
 
   async setBanned(actorId: string, actorRole: UserRole, userId: string, banned: boolean) {
@@ -168,7 +198,10 @@ export class UsersService {
       ]);
     }
 
-    return this.mapUser(user);
+    return this.mapUser(
+      user,
+      await this.permissionsFor(user.id, user.role),
+    );
   }
 
   async remove(actorId: string, actorRole: UserRole, userId: string) {

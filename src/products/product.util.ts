@@ -91,7 +91,7 @@ export function parseVariantInputs(raw: unknown): ProductVariantDto[] {
       ...(id ? { id } : {}),
       sku,
       weight,
-      price: Math.round(price),
+      price: Math.round(price * 100) / 100,
       stock: Math.round(stock),
       sortOrder,
     });

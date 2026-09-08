@@ -20,9 +20,9 @@ import {
   emptyAdjustments,
   type CartAdjustments,
   type CartLineView,
-  type CartRemovalReason,
   type CartResponse,
 } from './cart.types';
+import { isInventoryEnabled } from '../common/inventory';
 
 type CartRow = {
   id: string;
@@ -42,6 +42,7 @@ type VariantWithProduct = {
     id: string;
     name: string;
     image: string;
+    slug: string;
     isActive: boolean;
   };
 };
@@ -52,6 +53,10 @@ export class CartService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {}
+
+  private inventoryOn() {
+    return isInventoryEnabled(this.config);
+  }
 
   private secureCookies() {
     return cookieSecure(this.config);
@@ -84,7 +89,13 @@ export class CartService {
       where: { id: { in: variantIds } },
       include: {
         product: {
-          select: { id: true, name: true, image: true, isActive: true },
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            slug: true,
+            isActive: true,
+          },
         },
       },
     });
@@ -121,7 +132,7 @@ export class CartService {
         });
         continue;
       }
-      if (variant.stock <= 0) {
+      if (this.inventoryOn() && variant.stock <= 0) {
         adjustments.removed.push({
           variantId: line.variantId,
           reason: 'out_of_stock',
@@ -129,23 +140,28 @@ export class CartService {
         continue;
       }
 
-      const capped = Math.min(qty, variant.stock);
-      if (capped < qty) {
-        adjustments.capped.push({
-          variantId: line.variantId,
-          from: qty,
-          to: capped,
-        });
+      let lineQty = qty;
+      if (this.inventoryOn()) {
+        const capped = Math.min(qty, variant.stock);
+        if (capped < qty) {
+          adjustments.capped.push({
+            variantId: line.variantId,
+            from: qty,
+            to: capped,
+          });
+        }
+        lineQty = capped;
       }
 
       items.push({
         productId: variant.product.id,
         variantId: variant.id,
+        productSlug: variant.product.slug,
         name: variant.product.name,
         image: variant.product.image,
         weight: variant.weight,
         price: variant.price,
-        qty: capped,
+        qty: lineQty,
         stock: variant.stock,
       });
     }
@@ -367,7 +383,7 @@ export class CartService {
     if (!variant.product.isActive) {
       throw new BadRequestException('Товар снят с продажи');
     }
-    if (variant.stock <= 0) {
+    if (this.inventoryOn() && variant.stock <= 0) {
       throw new BadRequestException('Товара нет в наличии');
     }
 
@@ -377,9 +393,11 @@ export class CartService {
       },
     });
     const requested = qty;
-    const capped = Math.min(requested, variant.stock);
+    const capped = this.inventoryOn()
+      ? Math.min(requested, variant.stock)
+      : requested;
     const adjustments = emptyAdjustments();
-    if (capped < requested) {
+    if (this.inventoryOn() && capped < requested) {
       adjustments.capped.push({
         variantId: opts.variantId,
         from: requested,
@@ -450,11 +468,5 @@ export class CartService {
       await this.prisma.cartItem.deleteMany({ where: { cartId: guest.id } });
     }
     return { items: [], adjustments: emptyAdjustments() };
-  }
-
-  removalMessage(reason: CartRemovalReason): string {
-    if (reason === 'inactive') return 'Товар снят с продажи и удалён из корзины';
-    if (reason === 'out_of_stock') return 'Товара нет в наличии — удалён из корзины';
-    return 'Товар больше недоступен и удалён из корзины';
   }
 }

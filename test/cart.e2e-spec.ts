@@ -9,16 +9,6 @@ import {
   createRawToken,
   hashToken,
 } from '../src/auth/auth.crypto';
-import type { SendMailInput } from '../src/mail/mail.tokens';
-
-function cookieHeader(setCookie: string | string[] | undefined): string {
-  const raw = Array.isArray(setCookie) ? setCookie : [setCookie ?? ''];
-  return raw
-    .filter(Boolean)
-    .map((c) => c.split(';')[0])
-    .join('; ');
-}
-
 function pickCookie(
   setCookie: string | string[] | undefined,
   name: string,
@@ -53,16 +43,28 @@ async function loginAs(
   return { user, cookie: `${SESSION_COOKIE}=${raw}` };
 }
 
-function extractToken(text: string): string {
-  const match = text.match(/token=([^\s&]+)/);
-  if (!match?.[1]) throw new Error('token not found in mail');
-  return decodeURIComponent(match[1]);
+/** Seed a magic-link token in DB (avoids mail cooldown / IP rate limits across the suite). */
+async function createMagicToken(app: INestApplication, email: string) {
+  const prisma = app.get(PrismaService);
+  const user = await prisma.user.upsert({
+    where: { email },
+    create: { email, role: UserRole.USER },
+    update: {},
+  });
+  const raw = createRawToken();
+  await prisma.magicLink.create({
+    data: {
+      userId: user.id,
+      tokenHash: hashToken(raw),
+      expiresAt: new Date(Date.now() + 15 * 60_000),
+    },
+  });
+  return { user, token: raw };
 }
 
 describe('Cart guest persist & merge (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  let sent: SendMailInput[];
   let variantId: string;
   let lowStockVariantId: string;
   let inactiveVariantId: string;
@@ -70,12 +72,7 @@ describe('Cart guest persist & merge (e2e)', () => {
   let inactiveProductId: string;
 
   beforeAll(async () => {
-    const capture = { sent: [] as SendMailInput[] };
-    sent = capture.sent;
     const created = await createTestApp({
-      mailSend: async (input) => {
-        capture.sent.push(input);
-      },
       cdek: 'missing',
       yandex: 'missing',
     });
@@ -179,6 +176,8 @@ describe('Cart guest persist & merge (e2e)', () => {
   });
 
   it('caps qty to stock on upsert', async () => {
+    if (process.env.INVENTORY_ENABLED !== 'true') return;
+
     const add = await request(app.getHttpServer())
       .put('/api/cart/items')
       .send({ variantId: lowStockVariantId, qty: 99 })
@@ -209,6 +208,8 @@ describe('Cart guest persist & merge (e2e)', () => {
   });
 
   it('rejects out-of-stock add', async () => {
+    if (process.env.INVENTORY_ENABLED !== 'true') return;
+
     await prisma.productVariant.update({
       where: { id: lowStockVariantId },
       data: { stock: 0 },
@@ -226,20 +227,16 @@ describe('Cart guest persist & merge (e2e)', () => {
   });
 
   it('login merges guest cart into empty user cart and clears guest cookie', async () => {
-    sent.length = 0;
     const email = 'cart-merge-empty@example.com';
+    const { token } = await createMagicToken(app, email);
 
     const guestAdd = await request(app.getHttpServer())
       .put('/api/cart/items')
       .send({ variantId, qty: 2 })
       .expect(200);
+    expect(guestAdd.body.items).toHaveLength(1);
+    expect(guestAdd.body.items[0].productSlug).toBeTruthy();
     const guestCookie = pickCookie(guestAdd.headers['set-cookie'], CART_COOKIE)!;
-
-    await request(app.getHttpServer())
-      .post('/api/auth/magic-link')
-      .send({ email })
-      .expect(200);
-    const token = extractToken(sent[0].text);
 
     const verify = await request(app.getHttpServer())
       .post('/api/auth/verify')
@@ -264,7 +261,6 @@ describe('Cart guest persist & merge (e2e)', () => {
   });
 
   it('login merge sums qtys then caps to stock', async () => {
-    sent.length = 0;
     const email = 'cart-merge-cap@example.com';
     const user = await loginAs(app, email);
 
@@ -286,16 +282,21 @@ describe('Cart guest persist & merge (e2e)', () => {
       .expect(200);
 
     expect(merged.body.items).toHaveLength(1);
-    expect(merged.body.items[0].qty).toBe(3);
-    expect(merged.body.adjustments.capped).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          variantId: lowStockVariantId,
-          from: 4,
-          to: 3,
-        }),
-      ]),
-    );
+    if (process.env.INVENTORY_ENABLED === 'true') {
+      expect(merged.body.items[0].qty).toBe(3);
+      expect(merged.body.adjustments.capped).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            variantId: lowStockVariantId,
+            from: 4,
+            to: 3,
+          }),
+        ]),
+      );
+    } else {
+      expect(merged.body.items[0].qty).toBe(4);
+      expect(merged.body.adjustments.capped).toEqual([]);
+    }
   });
 
   it('merge drops inactive and out-of-stock lines', async () => {
@@ -349,21 +350,40 @@ describe('Cart guest persist & merge (e2e)', () => {
       .set('Cookie', `${user.cookie}; ${guestCookie}`)
       .expect(200);
 
-    expect(merged.body.items.map((i: { variantId: string }) => i.variantId)).toEqual([
-      variantId,
-    ]);
-    expect(merged.body.adjustments.removed).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          variantId: inactiveVariantId,
-          reason: 'inactive',
-        }),
-        expect.objectContaining({
-          variantId: oosVariant.id,
-          reason: 'out_of_stock',
-        }),
-      ]),
-    );
+    if (process.env.INVENTORY_ENABLED === 'true') {
+      expect(merged.body.items.map((i: { variantId: string }) => i.variantId)).toEqual([
+        variantId,
+      ]);
+      expect(merged.body.adjustments.removed).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            variantId: inactiveVariantId,
+            reason: 'inactive',
+          }),
+          expect.objectContaining({
+            variantId: oosVariant.id,
+            reason: 'out_of_stock',
+          }),
+        ]),
+      );
+    } else {
+      expect(merged.body.items.map((i: { variantId: string }) => i.variantId).sort()).toEqual(
+        [variantId, oosVariant.id].sort(),
+      );
+      expect(merged.body.adjustments.removed).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            variantId: inactiveVariantId,
+            reason: 'inactive',
+          }),
+        ]),
+      );
+      expect(
+        merged.body.adjustments.removed.some(
+          (r: { reason: string }) => r.reason === 'out_of_stock',
+        ),
+      ).toBe(false);
+    }
 
     await prisma.cartItem.deleteMany({ where: { variantId: oosVariant.id } });
     await prisma.productVariant.delete({ where: { id: oosVariant.id } });
@@ -392,5 +412,35 @@ describe('Cart guest persist & merge (e2e)', () => {
     expect(onlySession.body.items.some((i: { variantId: string }) => i.variantId === variantId)).toBe(
       true,
     );
+  });
+
+  it('DELETE item and clear cart', async () => {
+    const add = await request(app.getHttpServer())
+      .put('/api/cart/items')
+      .send({ variantId, qty: 2 })
+      .expect(200);
+    const guestCookie = pickCookie(add.headers['set-cookie'], CART_COOKIE)!;
+
+    await request(app.getHttpServer())
+      .delete(`/api/cart/items/${variantId}`)
+      .set('Cookie', guestCookie)
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.items).toHaveLength(0);
+      });
+
+    await request(app.getHttpServer())
+      .put('/api/cart/items')
+      .set('Cookie', guestCookie)
+      .send({ variantId, qty: 1 })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .delete('/api/cart')
+      .set('Cookie', guestCookie)
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.items).toHaveLength(0);
+      });
   });
 });

@@ -35,7 +35,7 @@ export class ResendMailService {
 
     if (!this.client) {
       this.logger.warn(
-        `RESEND_API_KEY missing — magic link for ${input.to}: ${input.text}`,
+        `RESEND_API_KEY missing — mail not sent to ${input.to} (token omitted from logs)`,
       );
       return;
     }

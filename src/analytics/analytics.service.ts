@@ -1,5 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { isInventoryEnabled } from '../common/inventory';
+
+const MAX_RANGE_DAYS = 366;
 
 function parseBoundary(value: string | undefined, endOfDay: boolean): Date | null {
   if (!value?.trim()) return null;
@@ -32,7 +36,10 @@ function dateKey(d: Date) {
 
 @Injectable()
 export class AnalyticsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
 
   async overview(from?: string, to?: string) {
     const now = new Date();
@@ -54,6 +61,14 @@ export class AnalyticsService {
 
     if (start.getTime() > end.getTime()) {
       return this.empty();
+    }
+
+    const rangeMs = end.getTime() - start.getTime();
+    const maxMs = MAX_RANGE_DAYS * 24 * 60 * 60 * 1000;
+    if (rangeMs > maxMs) {
+      throw new BadRequestException(
+        `Период аналитики не больше ${MAX_RANGE_DAYS} дней`,
+      );
     }
 
     const orders = await this.prisma.order.findMany({
@@ -112,14 +127,16 @@ export class AnalyticsService {
       }
     }
 
-    const lowStock = await this.prisma.productVariant.findMany({
-      where: { stock: { lte: 5 } },
-      orderBy: { stock: 'asc' },
-      take: 10,
-      include: {
-        product: { select: { name: true, slug: true } },
-      },
-    });
+    const lowStock = isInventoryEnabled(this.config)
+      ? await this.prisma.productVariant.findMany({
+          where: { stock: { lte: 5 } },
+          orderBy: { stock: 'asc' },
+          take: 10,
+          include: {
+            product: { select: { name: true, slug: true } },
+          },
+        })
+      : [];
 
     const topProducts = [...productSales.values()]
       .sort((a, b) => b.revenue - a.revenue)

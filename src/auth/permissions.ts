@@ -7,11 +7,16 @@ export const STAFF_ROLES: UserRole[] = [
   UserRole.ADMIN,
 ];
 
-export const ALL_STAFF_PERMISSIONS: StaffPermission[] = [
+export const PRODUCT_PERMISSIONS: StaffPermission[] = [
   StaffPermission.PRODUCT_CREATE,
   StaffPermission.PRODUCT_DELETE,
   StaffPermission.PRODUCT_EDIT,
   StaffPermission.PRODUCT_STOCK,
+];
+
+export const ALL_STAFF_PERMISSIONS: StaffPermission[] = [
+  ...PRODUCT_PERMISSIONS,
+  StaffPermission.ORDER_MANAGE,
 ];
 
 export function isStaffRole(role: UserRole): boolean {
@@ -34,7 +39,13 @@ export function hasAnyProductPermission(
   user: Pick<AuthUser, 'role' | 'permissions'>,
 ): boolean {
   if (user.role === UserRole.ADMIN) return true;
-  return user.permissions.some((p) => ALL_STAFF_PERMISSIONS.includes(p));
+  return user.permissions.some((p) => PRODUCT_PERMISSIONS.includes(p));
+}
+
+export function canManageOrders(
+  user: Pick<AuthUser, 'role' | 'permissions'>,
+): boolean {
+  return hasPermission(user, StaffPermission.ORDER_MANAGE);
 }
 
 export function canAccessAnalytics(

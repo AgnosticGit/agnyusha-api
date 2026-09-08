@@ -27,6 +27,7 @@ enum StaffPermission {
   PRODUCT_DELETE
   PRODUCT_EDIT
   PRODUCT_STOCK
+  ORDER_MANAGE
 }
 
 enum ProductCategory {
@@ -43,6 +44,7 @@ enum ProductBadge {
 
 enum OrderStatus {
   NEW
+  PAID
   CONFIRMED
   SHIPPED
   DONE
@@ -144,7 +146,7 @@ model ProductVariant {
   productId String   @map("product_id")
   sku       String   @unique
   weight    String
-  price     Int
+  price     Float
   stock     Int      @default(0)
   sortOrder Int      @default(0) @map("sort_order")
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -184,7 +186,7 @@ model CartItem {
 
 model Order {
   id                 String      @id @default(cuid())
-  userId             String      @map("user_id")
+  userId             String?     @map("user_id")
   status             OrderStatus @default(NEW)
   phone              String
   contactChannel     String      @map("contact_channel")
@@ -194,9 +196,12 @@ model Order {
   pickupLabel        String?     @map("pickup_label")
   pickupCode         String?     @map("pickup_code")
   externalDeliveryId String?     @map("external_delivery_id")
-  total              Int
+  paymentExternalId  String?     @map("payment_external_id")
+  paymentPayLink     String?     @map("payment_pay_link")
+  paidAt             DateTime?   @map("paid_at")
+  total              Float
   createdAt          DateTime    @default(now()) @map("created_at")
-  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user               User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
   items              OrderItem[]
 
   @@index([userId, createdAt])
@@ -212,7 +217,7 @@ model OrderItem {
   productName String          @map("product_name")
   image       String
   weight      String
-  price       Int
+  price       Float
   qty         Int
   order       Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product     Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)

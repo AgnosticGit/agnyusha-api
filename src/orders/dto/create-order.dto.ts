@@ -15,24 +15,27 @@ export class CreateOrderItemDto {
   @IsString()
   productId?: string;
 
+  /** Required — price/name/image are taken from the catalog, not the client. */
+  @IsString()
+  @MinLength(1)
+  variantId!: string;
+
   @IsOptional()
   @IsString()
-  variantId?: string;
+  name?: string;
 
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  name!: string;
+  image?: string;
 
+  @IsOptional()
   @IsString()
-  image!: string;
+  weight?: string;
 
-  @IsString()
-  @MinLength(1)
-  weight!: string;
-
+  @IsOptional()
   @IsInt()
   @Min(0)
-  price!: number;
+  price?: number;
 
   @IsInt()
   @Min(1)

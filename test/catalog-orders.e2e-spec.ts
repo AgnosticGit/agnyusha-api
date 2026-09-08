@@ -180,20 +180,33 @@ describe('Catalog admin & orders (e2e)', () => {
       .get(`/api/admin/products/${create.body.id}`)
       .set('Cookie', admin.cookie)
       .expect(200);
-    expect(afterOrder.body.variants[0].stock).toBe(8);
+    expect(afterOrder.body.variants[0].stock).toBe(
+      process.env.INVENTORY_ENABLED === 'true' ? 8 : 10,
+    );
 
     const list = await request(app.getHttpServer())
       .get('/api/orders')
       .set('Cookie', buyer.cookie)
       .expect(200);
-    expect(list.body.some((o: { id: string }) => o.id === order.body.id)).toBe(
-      true,
-    );
+    const listed = list.body.find((o: { id: string }) => o.id === order.body.id);
+    expect(listed).toBeTruthy();
+    expect(listed.items[0].productSlug).toBe(create.body.slug);
+    expect(order.body.items[0].productSlug).toBe(create.body.slug);
 
     await request(app.getHttpServer())
       .delete(`/api/admin/products/${create.body.id}`)
       .set('Cookie', admin.cookie)
       .expect(200);
+
+    const afterDelete = await request(app.getHttpServer())
+      .get('/api/orders')
+      .set('Cookie', buyer.cookie)
+      .expect(200);
+    const orphaned = afterDelete.body.find(
+      (o: { id: string }) => o.id === order.body.id,
+    );
+    expect(orphaned.items[0].productId).toBeNull();
+    expect(orphaned.items[0].productSlug).toBeNull();
   });
 
   it('admin can upload multiple product images', async () => {
@@ -454,26 +467,35 @@ describe('Catalog admin & orders (e2e)', () => {
       .get('/api/admin/inventory')
       .query({ page: 1, limit: 10 })
       .set('Cookie', staffCookie)
-      .expect(200);
-    expect(Array.isArray(inv.body.items)).toBe(true);
-    expect(inv.body.page).toBe(1);
-    expect(inv.body.limit).toBe(10);
-    expect(typeof inv.body.total).toBe('number');
-    expect(inv.body.items[0]?.product?.image).toBeTruthy();
+      .expect(process.env.INVENTORY_ENABLED === 'true' ? 200 : 404);
 
-    const page2 = await request(app.getHttpServer())
-      .get('/api/admin/inventory')
-      .query({ page: 1, limit: 1 })
-      .set('Cookie', staffCookie)
-      .expect(200);
-    expect(page2.body.items).toHaveLength(1);
-    expect(page2.body.total).toBeGreaterThanOrEqual(1);
+    if (process.env.INVENTORY_ENABLED === 'true') {
+      expect(Array.isArray(inv.body.items)).toBe(true);
+      expect(inv.body.page).toBe(1);
+      expect(inv.body.limit).toBe(10);
+      expect(typeof inv.body.total).toBe('number');
+      expect(inv.body.items[0]?.product?.image).toBeTruthy();
 
-    await request(app.getHttpServer())
-      .patch(`/api/admin/inventory/${created.body.variants[0].id}`)
-      .set('Cookie', staffCookie)
-      .send({ stock: 7 })
-      .expect(200);
+      const page2 = await request(app.getHttpServer())
+        .get('/api/admin/inventory')
+        .query({ page: 1, limit: 1 })
+        .set('Cookie', staffCookie)
+        .expect(200);
+      expect(page2.body.items).toHaveLength(1);
+      expect(page2.body.total).toBeGreaterThanOrEqual(1);
+
+      await request(app.getHttpServer())
+        .patch(`/api/admin/inventory/${created.body.variants[0].id}`)
+        .set('Cookie', staffCookie)
+        .send({ stock: 7 })
+        .expect(200);
+    } else {
+      await request(app.getHttpServer())
+        .patch(`/api/admin/inventory/${created.body.variants[0].id}`)
+        .set('Cookie', staffCookie)
+        .send({ stock: 7 })
+        .expect(404);
+    }
 
     const buyer = await loginAs(app, 'stock-buyer@example.com', UserRole.USER);
     await request(app.getHttpServer())
@@ -497,7 +519,7 @@ describe('Catalog admin & orders (e2e)', () => {
           },
         ],
       })
-      .expect(400);
+      .expect(process.env.INVENTORY_ENABLED === 'true' ? 400 : 201);
 
     const analytics = await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')
@@ -514,6 +536,12 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(ranged.body.revenueByDay).toHaveLength(7);
     expect(ranged.body.totals.orders).toBe(0);
 
+    await request(app.getHttpServer())
+      .get('/api/admin/analytics/overview')
+      .query({ from: '2020-01-01', to: '2022-01-01' })
+      .set('Cookie', manager.cookie)
+      .expect(400);
+
     const promoted = await request(app.getHttpServer())
       .patch(`/api/admin/users/${staffUser.id}/role`)
       .set('Cookie', manager.cookie)
@@ -525,6 +553,129 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(promoted.body.permissions).toEqual(
       expect.arrayContaining(['PRODUCT_CREATE', 'PRODUCT_STOCK']),
     );
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${created.body.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+  });
+
+  it('order ignores client price and rejects missing/inactive variants', async () => {
+    const admin = await loginAs(app, 'admin-price@example.com', UserRole.ADMIN);
+    const created = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Цена с сервера',
+        category: 'DOGS',
+        variants: [
+          { sku: 'E2E-PRICE-01', weight: '1 кг.', price: 1500, stock: 5 },
+        ],
+        ingredients: 't',
+        description: 't',
+      })
+      .expect(201);
+
+    const buyer = await loginAs(app, 'buyer-price@example.com', UserRole.USER);
+
+    const underpriced = await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', buyer.cookie)
+      .send({
+        phone: '+7 (999) 111-22-33',
+        contactChannel: 'Telegram',
+        cityLabel: 'Санкт-Петербург',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        items: [
+          {
+            variantId: created.body.variants[0].id,
+            name: 'Fake',
+            image: '/x.png',
+            weight: '1 кг.',
+            price: 1,
+            qty: 2,
+          },
+        ],
+      })
+      .expect(201);
+
+    expect(underpriced.body.total).toBe(3000);
+    expect(underpriced.body.items[0].price).toBe(1500);
+    expect(underpriced.body.items[0].name).toBe('Цена с сервера');
+
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', buyer.cookie)
+      .send({
+        phone: '+7 (999) 111-22-33',
+        contactChannel: 'Telegram',
+        cityLabel: 'Санкт-Петербург',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        items: [{ variantId: 'missing-variant', qty: 1 }],
+      })
+      .expect(400);
+
+    const prisma = app.get(PrismaService);
+    await prisma.product.update({
+      where: { id: created.body.id },
+      data: { isActive: false },
+    });
+
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', buyer.cookie)
+      .send({
+        phone: '+7 (999) 111-22-33',
+        contactChannel: 'Telegram',
+        cityLabel: 'Санкт-Петербург',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${created.body.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+  });
+
+  it('guest can place order without session', async () => {
+    const admin = await loginAs(app, 'admin-guest-order@example.com', UserRole.ADMIN);
+    const created = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Гостевой заказ',
+        category: 'DOGS',
+        variants: [
+          { sku: 'E2E-GUEST-01', weight: '1 кг.', price: 900, stock: 4 },
+        ],
+        ingredients: 't',
+        description: 't',
+      })
+      .expect(201);
+
+    const order = await request(app.getHttpServer())
+      .post('/api/orders')
+      .send({
+        phone: '+7 (900) 555-44-33',
+        contactChannel: 'WhatsApp',
+        cityLabel: 'Санкт-Петербург',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+      })
+      .expect(201);
+
+    expect(order.body.total).toBe(900);
+    expect(order.body.items).toHaveLength(1);
+
+    const prisma = app.get(PrismaService);
+    const row = await prisma.order.findUnique({ where: { id: order.body.id } });
+    expect(row?.userId).toBeNull();
 
     await request(app.getHttpServer())
       .delete(`/api/admin/products/${created.body.id}`)

@@ -3,6 +3,7 @@ export type CartRemovalReason = 'inactive' | 'missing' | 'out_of_stock';
 export type CartLineView = {
   productId: string;
   variantId: string;
+  productSlug: string;
   name: string;
   image: string;
   weight: string;

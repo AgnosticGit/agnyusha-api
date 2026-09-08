@@ -31,6 +31,8 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
         return jsonResponse({
           variants: [
             { geo_id: 2, address: 'Санкт-Петербург' },
+            // Same geo_id, different label — must not produce duplicate React keys
+            { geo_id: 2, address: 'Санкт-Петербург, Россия' },
             { geo_id: 213, address: 'Москва' },
           ],
         });
@@ -41,22 +43,21 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
           geo_id?: number;
         };
         expect(body.geo_id).toBe(2);
+        const point = {
+          id: 'ya-spb-1',
+          name: 'Яндекс ПВЗ Невский',
+          type: 'pickup_point',
+          address: {
+            full_address: 'Невский пр., 10',
+            locality: 'Санкт-Петербург',
+            region: 'Санкт-Петербург',
+            postal_code: '191186',
+          },
+          position: { latitude: 59.93, longitude: 30.33 },
+          payment_methods: ['already_paid', 'card_on_receipt'],
+        };
         return jsonResponse({
-          points: [
-            {
-              id: 'ya-spb-1',
-              name: 'Яндекс ПВЗ Невский',
-              type: 'pickup_point',
-              address: {
-                full_address: 'Невский пр., 10',
-                locality: 'Санкт-Петербург',
-                region: 'Санкт-Петербург',
-                postal_code: '191186',
-              },
-              position: { latitude: 59.93, longitude: 30.33 },
-              payment_methods: ['already_paid', 'card_on_receipt'],
-            },
-          ],
+          points: [point, { ...point, name: 'Дубликат того же ПВЗ' }],
         });
       }
 
@@ -121,6 +122,11 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
         }),
       ]),
     );
+    const ids = (res.body as { id: string }[]).map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(
+      (res.body as { yandexGeoId: number }[]).filter((c) => c.yandexGeoId === 2),
+    ).toHaveLength(1);
 
     expect(calls.every((c) => c.url.includes('yandex.net'))).toBe(true);
     expect(calls.some((c) => c.url.includes('/location/detect'))).toBe(true);
@@ -187,6 +193,28 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
       },
     });
 
+    const product = await prisma.product.create({
+      data: {
+        slug: `yandex-order-${Date.now()}`,
+        name: 'Корм тест Yandex',
+        image: '/assets/product-turkey.png',
+        category: 'DOGS',
+        ingredients: 't',
+        description: 't',
+        variants: {
+          create: [
+            {
+              sku: `YANDEX-ORD-${Date.now()}`,
+              weight: '0,8 кг.',
+              price: 725,
+              stock: 5,
+            },
+          ],
+        },
+      },
+      include: { variants: true },
+    });
+
     const order = await request(app.getHttpServer())
       .post('/api/orders')
       .set('Cookie', `${SESSION_COOKIE}=${raw}`)
@@ -200,10 +228,7 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
         pickupCode: '01946f4f013c7337874ec2fb848a58a4',
         items: [
           {
-            name: 'Корм тест',
-            image: '/assets/product-turkey.png',
-            weight: '0,8 кг.',
-            price: 725,
+            variantId: product.variants[0].id,
             qty: 1,
           },
         ],
@@ -212,8 +237,11 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
 
     expect(order.body.externalDeliveryId).toBe('yandex-request-test-1');
     expect(order.body.pickupCode).toBe('01946f4f013c7337874ec2fb848a58a4');
+    expect(order.body.total).toBe(725);
     expect(calls.some((c) => c.url.includes('/offers/create'))).toBe(true);
     expect(calls.some((c) => c.url.includes('/offers/confirm'))).toBe(true);
+
+    await prisma.product.delete({ where: { id: product.id } });
   });
 
   it('returns generic 503 when Yandex token is missing', async () => {

@@ -14,6 +14,7 @@ import { SESSION_COOKIE } from './auth.crypto';
 import type { AuthUser } from './auth.types';
 import {
   canAccessAnalytics,
+  canManageOrders,
   canManageUsers,
   hasAnyProductPermission,
   hasPermission,
@@ -50,44 +51,6 @@ export class AuthGuard implements CanActivate {
       req.cookies?.[SESSION_COOKIE],
     );
     if (!user) throw new UnauthorizedException('Нужна авторизация');
-    req.user = user;
-    return true;
-  }
-}
-
-/** Full superuser only. */
-@Injectable()
-export class AdminGuard implements CanActivate {
-  constructor(private readonly auth: AuthService) {}
-
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.getUserBySessionToken(
-      req.cookies?.[SESSION_COOKIE],
-    );
-    if (!user) throw new UnauthorizedException('Нужна авторизация');
-    if (user.role !== UserRole.ADMIN) {
-      throw new ForbiddenException('Недостаточно прав');
-    }
-    req.user = user;
-    return true;
-  }
-}
-
-/** Any staff member (STAFF / MANAGER / ADMIN). */
-@Injectable()
-export class StaffGuard implements CanActivate {
-  constructor(private readonly auth: AuthService) {}
-
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.getUserBySessionToken(
-      req.cookies?.[SESSION_COOKIE],
-    );
-    if (!user) throw new UnauthorizedException('Нужна авторизация');
-    if (!isStaffRole(user.role)) {
-      throw new ForbiddenException('Недостаточно прав');
-    }
     req.user = user;
     return true;
   }
@@ -178,6 +141,25 @@ export class AnalyticsAccessGuard implements CanActivate {
     );
     if (!user) throw new UnauthorizedException('Нужна авторизация');
     if (!canAccessAnalytics(user)) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+    req.user = user;
+    return true;
+  }
+}
+
+/** ADMIN always; otherwise ORDER_MANAGE. */
+@Injectable()
+export class OrdersAccessGuard implements CanActivate {
+  constructor(private readonly auth: AuthService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<AuthedRequest>();
+    const user = await this.auth.getUserBySessionToken(
+      req.cookies?.[SESSION_COOKIE],
+    );
+    if (!user) throw new UnauthorizedException('Нужна авторизация');
+    if (!canManageOrders(user)) {
       throw new ForbiddenException('Недостаточно прав');
     }
     req.user = user;

@@ -38,6 +38,7 @@ const child = spawn("npx", ["nest", "start", "--watch"], {
     ...process.env,
     NODE_ENV: "development",
     CORS_ORIGIN: publicUrl,
+    PUBLIC_WEB_URL: publicUrl,
     COOKIE_SECURE: "true",
     COOKIE_SAMESITE: "lax",
     GOOGLE_CALLBACK_URL: `${publicUrl}/api/auth/google/callback`,

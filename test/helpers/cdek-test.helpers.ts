@@ -20,10 +20,13 @@ export function applyTestDeliveryEnv(options?: {
   cdek?: 'present' | 'missing';
   yandex?: 'present' | 'missing';
   google?: 'present' | 'missing';
+  ozon?: 'present' | 'missing';
+  ozonNotificationSecret?: string;
 }) {
   const cdek = options?.cdek ?? 'present';
   const yandex = options?.yandex ?? 'missing';
   const google = options?.google ?? 'missing';
+  const ozon = options?.ozon ?? 'missing';
 
   process.env.NODE_ENV = 'test';
   process.env.DATABASE_URL =
@@ -36,6 +39,21 @@ export function applyTestDeliveryEnv(options?: {
   process.env.MAIL_FROM = 'Агнюша <onboarding@resend.dev>';
   process.env.RESEND_API_KEY = '';
   process.env.MAGIC_LINK_EXPIRES_MINUTES = '15';
+  process.env.INVENTORY_ENABLED = 'false';
+  process.env.PUBLIC_WEB_URL = 'http://localhost:3000';
+  // Force empty unless a test opts in — otherwise local .env secrets leak into e2e.
+  process.env.OZON_PAY_NOTIFICATION_SECRET =
+    options?.ozonNotificationSecret ?? '';
+
+  if (ozon === 'present') {
+    process.env.OZON_PAY_ACCESS_KEY =
+      process.env.OZON_PAY_ACCESS_KEY || 'test-access-key';
+    process.env.OZON_PAY_SECRET_KEY =
+      process.env.OZON_PAY_SECRET_KEY || 'test-secret-key';
+  } else {
+    process.env.OZON_PAY_ACCESS_KEY = '';
+    process.env.OZON_PAY_SECRET_KEY = '';
+  }
 
   if (cdek === 'present') {
     process.env.CDEK_CLIENT_ID = 'test-client-id';
@@ -113,11 +131,15 @@ export async function createTestApp(options: {
   cdek?: 'present' | 'missing';
   yandex?: 'present' | 'missing';
   google?: 'present' | 'missing';
+  ozon?: 'present' | 'missing';
+  ozonNotificationSecret?: string;
 }) {
   applyTestDeliveryEnv({
     cdek: options.cdek ?? (options.cdekFetch ? 'present' : 'missing'),
     yandex: options.yandex ?? (options.yandexFetch ? 'present' : 'missing'),
     google: options.google ?? (options.googleFetch ? 'present' : 'missing'),
+    ozon: options.ozon ?? 'missing',
+    ozonNotificationSecret: options.ozonNotificationSecret,
   });
 
   let builder = Test.createTestingModule({
