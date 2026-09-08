@@ -224,19 +224,37 @@ export class OrdersService {
     }
   }
 
-  async listForUser(userId: string) {
-    const orders = await this.prisma.order.findMany({
-      where: { userId },
-      include: {
-        items: {
-          include: {
-            product: { select: { slug: true, isActive: true } },
+  async listForUser(
+    userId: string,
+    query: { page?: number; limit?: number } = {},
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const where = { userId };
+
+    const [orders, total] = await this.prisma.$transaction([
+      this.prisma.order.findMany({
+        where,
+        include: {
+          items: {
+            include: {
+              product: { select: { slug: true, isActive: true } },
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    return orders.map((o) => this.map(o));
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return {
+      items: orders.map((o) => this.map(o)),
+      total,
+      page,
+      limit,
+    };
   }
 
   async getForUser(userId: string, orderId: string) {
@@ -329,6 +347,7 @@ export class OrdersService {
         by: ['status'],
         where: searchWhere,
         _count: { _all: true },
+        orderBy: { status: 'asc' },
       }),
     ]);
 
@@ -341,7 +360,11 @@ export class OrdersService {
       CANCELLED: 0,
     };
     for (const row of statusGroups) {
-      counts[row.status] = row._count._all;
+      const all =
+        typeof row._count === 'object' && row._count != null
+          ? row._count._all
+          : undefined;
+      counts[row.status] = all ?? 0;
     }
 
     return {
@@ -356,29 +379,83 @@ export class OrdersService {
   async updateStatus(orderId: string, status: OrderStatus) {
     const existing = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, paidAt: true },
+      include: { items: true },
     });
     if (!existing) throw new NotFoundException('Заказ не найден');
 
-    const order = await this.prisma.order.update({
-      where: { id: orderId },
-      data: {
-        status,
-        ...(status === OrderStatus.PAID && !existing.paidAt
-          ? { paidAt: new Date() }
-          : {}),
-      },
-      include: {
-        user: { select: { email: true } },
-        items: {
-          include: {
-            product: { select: { slug: true, isActive: true } },
+    const order = await this.prisma.$transaction(async (tx) => {
+      if (
+        status === OrderStatus.CANCELLED &&
+        existing.status !== OrderStatus.CANCELLED
+      ) {
+        await this.restoreStock(tx, existing.items);
+      }
+
+      return tx.order.update({
+        where: { id: orderId },
+        data: {
+          status,
+          ...(status === OrderStatus.PAID && !existing.paidAt
+            ? { paidAt: new Date() }
+            : {}),
+        },
+        include: {
+          user: { select: { email: true } },
+          items: {
+            include: {
+              product: { select: { slug: true, isActive: true } },
+            },
           },
         },
-      },
+      });
     });
 
     return this.mapAdmin(order);
+  }
+
+  /** Buyer may cancel only unpaid NEW orders. */
+  async cancelForUser(userId: string, orderId: string) {
+    const existing = await this.prisma.order.findFirst({
+      where: { id: orderId, userId },
+      include: { items: true },
+    });
+    if (!existing) throw new NotFoundException('Заказ не найден');
+    if (existing.paidAt || existing.status !== OrderStatus.NEW) {
+      throw new BadRequestException(
+        'Отменить можно только неоплаченный заказ',
+      );
+    }
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      await this.restoreStock(tx, existing.items);
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.CANCELLED },
+        include: {
+          items: {
+            include: {
+              product: { select: { slug: true, isActive: true } },
+            },
+          },
+        },
+      });
+    });
+
+    return this.map(order);
+  }
+
+  private async restoreStock(
+    tx: Prisma.TransactionClient,
+    items: Array<{ variantId: string | null; qty: number }>,
+  ) {
+    if (!this.inventoryOn()) return;
+    for (const item of items) {
+      if (!item.variantId) continue;
+      await tx.productVariant.update({
+        where: { id: item.variantId },
+        data: { stock: { increment: item.qty } },
+      });
+    }
   }
 
   private mapAdmin(

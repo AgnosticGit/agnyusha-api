@@ -267,7 +267,7 @@ describe('Ozon Pay (e2e)', () => {
         .get('/api/orders')
         .set('Cookie', cookie)
         .expect(200);
-      expect(list.body).toEqual(
+      expect(list.body.items).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             id: order.id,

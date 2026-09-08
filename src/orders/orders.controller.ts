@@ -18,6 +18,7 @@ import {
 } from '../auth/auth.guard';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
+import { ListMyOrdersDto } from './dto/list-my-orders.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { OrdersService } from './orders.service';
 
@@ -27,8 +28,8 @@ export class OrdersController {
 
   @Get()
   @UseGuards(AuthGuard)
-  list(@Req() req: AuthedRequest) {
-    return this.orders.listForUser(req.user!.id);
+  list(@Req() req: AuthedRequest, @Query() query: ListMyOrdersDto) {
+    return this.orders.listForUser(req.user!.id, query);
   }
 
   @Post(':id/pay')
@@ -36,6 +37,13 @@ export class OrdersController {
   @UseGuards(AuthGuard)
   pay(@Req() req: AuthedRequest, @Param('id') id: string) {
     return this.orders.getPayUrlForUser(req.user!.id, id);
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(200)
+  @UseGuards(AuthGuard)
+  cancel(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.orders.cancelForUser(req.user!.id, id);
   }
 
   @Get(':id')

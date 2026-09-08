@@ -188,7 +188,9 @@ describe('Catalog admin & orders (e2e)', () => {
       .get('/api/orders')
       .set('Cookie', buyer.cookie)
       .expect(200);
-    const listed = list.body.find((o: { id: string }) => o.id === order.body.id);
+    const listed = list.body.items.find(
+      (o: { id: string }) => o.id === order.body.id,
+    );
     expect(listed).toBeTruthy();
     expect(listed.items[0].productSlug).toBe(create.body.slug);
     expect(order.body.items[0].productSlug).toBe(create.body.slug);
@@ -202,7 +204,7 @@ describe('Catalog admin & orders (e2e)', () => {
       .get('/api/orders')
       .set('Cookie', buyer.cookie)
       .expect(200);
-    const orphaned = afterDelete.body.find(
+    const orphaned = afterDelete.body.items.find(
       (o: { id: string }) => o.id === order.body.id,
     );
     expect(orphaned.items[0].productId).toBeNull();

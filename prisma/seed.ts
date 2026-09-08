@@ -127,30 +127,30 @@ const productsSeed = [
 async function seedDeliveryMethods() {
   const methods = [
     {
-      code: DeliveryMethodCode.PICKUP,
-      title: 'Самовывоз',
-      description: 'Из пункта в Ленинградской области',
-      sortOrder: 1,
-      isActive: true,
-    },
-    {
       code: DeliveryMethodCode.CDEK,
       title: 'СДЭК',
       description: 'Доставка в пункт выдачи СДЭК',
-      sortOrder: 2,
+      sortOrder: 1,
       isActive: true,
     },
     {
       code: DeliveryMethodCode.YANDEX,
       title: 'Яндекс Доставка',
       description: 'Доставка в пункт выдачи Яндекс',
-      sortOrder: 3,
+      sortOrder: 2,
       isActive: true,
     },
     {
       code: DeliveryMethodCode.POST,
       title: 'Почта России',
       description: 'Доставка Почтой России',
+      sortOrder: 3,
+      isActive: true,
+    },
+    {
+      code: DeliveryMethodCode.PICKUP,
+      title: 'Самовывоз',
+      description: 'Из пункта в Ленинградской области',
       sortOrder: 4,
       isActive: true,
     },

@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development nest start --watch",
     "dev:ngrok": "node scripts/run-dev-ngrok.mjs",
+    "dev:kill": "node scripts/kill-ports.mjs",
     "release": "cross-env NODE_ENV=production nest build && cross-env NODE_ENV=production node dist/main",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

@@ -47,6 +47,12 @@ describe('Delivery methods (e2e)', () => {
     expect(byCode.CDEK).toBe(true);
     expect(byCode.YANDEX).toBe(false);
     expect(byCode.POST).toBe(true);
+    expect(local.body.map((m: { code: string }) => m.code)).toEqual([
+      'CDEK',
+      'YANDEX',
+      'POST',
+      'PICKUP',
+    ]);
 
     const remote = await request(app.getHttpServer())
       .get('/api/delivery-methods')

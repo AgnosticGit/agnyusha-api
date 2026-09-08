@@ -160,11 +160,14 @@ describe('Admin orders CRM (e2e)', () => {
       .set('Cookie', buyerCookie)
       .expect(200);
 
-    expect(mine.body).toEqual(
+    expect(mine.body.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: order.id, status: 'CONFIRMED' }),
       ]),
     );
+    expect(mine.body.page).toBe(1);
+    expect(mine.body.limit).toBe(10);
+    expect(mine.body.total).toBeGreaterThanOrEqual(1);
   });
 
   it('admin can manage orders without explicit permission row', async () => {
@@ -182,5 +185,44 @@ describe('Admin orders CRM (e2e)', () => {
       .expect(200);
 
     expect(patched.body.status).toBe('SHIPPED');
+  });
+
+  it('buyer can cancel unpaid NEW order', async () => {
+    const order = await seedOrder('orders-cancel-buyer@example.com');
+    const { cookie } = await loginAs(
+      app,
+      'orders-cancel-buyer@example.com',
+      UserRole.USER,
+    );
+
+    const cancelled = await request(app.getHttpServer())
+      .post(`/api/orders/${order.id}/cancel`)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(cancelled.body.status).toBe('CANCELLED');
+
+    await request(app.getHttpServer())
+      .post(`/api/orders/${order.id}/cancel`)
+      .set('Cookie', cookie)
+      .expect(400);
+  });
+
+  it('does not expose admin order delete', async () => {
+    const order = await seedOrder('orders-nodelete-buyer@example.com');
+    const { cookie } = await loginAs(
+      app,
+      'orders-nodelete-staff@example.com',
+      UserRole.STAFF,
+      [StaffPermission.ORDER_MANAGE],
+    );
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/orders/${order.id}`)
+      .set('Cookie', cookie)
+      .expect(404);
+
+    const still = await prisma.order.findUnique({ where: { id: order.id } });
+    expect(still).not.toBeNull();
   });
 });
