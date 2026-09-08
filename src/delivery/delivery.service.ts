@@ -58,15 +58,6 @@ export class DeliveryService {
             : 'Самовывоз доступен только для СПб и ЛО',
         };
       }
-      if (m.code === DeliveryMethodCode.COURIER) {
-        return {
-          ...m,
-          available: local,
-          note: local
-            ? 'Курьерская доставка по адресу'
-            : 'Курьер доступен в СПб и ЛО',
-        };
-      }
       if (m.code === DeliveryMethodCode.CDEK) {
         return {
           ...m,

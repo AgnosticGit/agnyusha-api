@@ -125,6 +125,13 @@ describe('Admin orders CRM (e2e)', () => {
       .expect(200);
 
     expect(list.body.total).toBeGreaterThanOrEqual(1);
+    expect(list.body.counts).toEqual(
+      expect.objectContaining({
+        NEW: expect.any(Number),
+        PAID: expect.any(Number),
+      }),
+    );
+    expect(list.body.counts.NEW).toBeGreaterThanOrEqual(1);
     expect(list.body.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

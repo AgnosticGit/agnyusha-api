@@ -210,30 +210,35 @@ export async function ensureDeliveryMethods(app: INestApplication) {
       title: 'Самовывоз',
       description: 'Из пункта в Ленинградской области',
       sortOrder: 1,
-    },
-    {
-      code: DeliveryMethodCode.COURIER,
-      title: 'Курьер',
-      description: 'Доставка курьером по адресу',
-      sortOrder: 2,
+      isActive: true,
     },
     {
       code: DeliveryMethodCode.CDEK,
       title: 'СДЭК',
       description: 'Доставка в пункт выдачи СДЭК',
-      sortOrder: 3,
+      sortOrder: 2,
+      isActive: true,
     },
     {
       code: DeliveryMethodCode.YANDEX,
       title: 'Яндекс Доставка',
       description: 'Доставка в пункт выдачи Яндекс',
-      sortOrder: 4,
+      sortOrder: 3,
+      isActive: true,
     },
     {
       code: DeliveryMethodCode.POST,
       title: 'Почта России',
       description: 'Доставка Почтой России',
-      sortOrder: 5,
+      sortOrder: 4,
+      isActive: true,
+    },
+    {
+      code: DeliveryMethodCode.COURIER,
+      title: 'Курьер',
+      description: 'Доставка курьером по адресу',
+      sortOrder: 99,
+      isActive: false,
     },
   ];
 
@@ -245,7 +250,7 @@ export async function ensureDeliveryMethods(app: INestApplication) {
         title: method.title,
         description: method.description,
         sortOrder: method.sortOrder,
-        isActive: true,
+        isActive: method.isActive,
       },
     });
   }

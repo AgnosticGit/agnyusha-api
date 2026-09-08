@@ -293,10 +293,9 @@ export class OrdersService {
     const limit = query.limit ?? 20;
     const q = query.q?.trim() || '';
 
-    const where: Prisma.OrderWhereInput = {};
-    if (query.status) where.status = query.status;
+    const searchWhere: Prisma.OrderWhereInput = {};
     if (q) {
-      where.OR = [
+      searchWhere.OR = [
         { id: { contains: q, mode: 'insensitive' } },
         { phone: { contains: q, mode: 'insensitive' } },
         { cityLabel: { contains: q, mode: 'insensitive' } },
@@ -305,7 +304,12 @@ export class OrdersService {
       ];
     }
 
-    const [total, orders] = await this.prisma.$transaction([
+    const where: Prisma.OrderWhereInput = {
+      ...searchWhere,
+      ...(query.status ? { status: query.status } : {}),
+    };
+
+    const [total, orders, statusGroups] = await this.prisma.$transaction([
       this.prisma.order.count({ where }),
       this.prisma.order.findMany({
         where,
@@ -321,13 +325,31 @@ export class OrdersService {
         skip: (page - 1) * limit,
         take: limit,
       }),
+      this.prisma.order.groupBy({
+        by: ['status'],
+        where: searchWhere,
+        _count: { _all: true },
+      }),
     ]);
+
+    const counts: Record<string, number> = {
+      NEW: 0,
+      PAID: 0,
+      CONFIRMED: 0,
+      SHIPPED: 0,
+      DONE: 0,
+      CANCELLED: 0,
+    };
+    for (const row of statusGroups) {
+      counts[row.status] = row._count._all;
+    }
 
     return {
       items: orders.map((o) => this.mapAdmin(o)),
       total,
       page,
       limit,
+      counts,
     };
   }
 

@@ -27,7 +27,7 @@ describe('Delivery methods (e2e)', () => {
     await app.close();
   });
 
-  it('marks pickup/courier available only for SPb / LO labels', async () => {
+  it('marks pickup available only for SPb / LO labels', async () => {
     const local = await request(app.getHttpServer())
       .get('/api/delivery-methods')
       .query({
@@ -43,7 +43,7 @@ describe('Delivery methods (e2e)', () => {
       ]),
     );
     expect(byCode.PICKUP).toBe(true);
-    expect(byCode.COURIER).toBe(true);
+    expect(byCode.COURIER).toBeUndefined();
     expect(byCode.CDEK).toBe(true);
     expect(byCode.YANDEX).toBe(false);
     expect(byCode.POST).toBe(true);
@@ -63,7 +63,7 @@ describe('Delivery methods (e2e)', () => {
       ]),
     );
     expect(remoteByCode.PICKUP).toBe(false);
-    expect(remoteByCode.COURIER).toBe(false);
+    expect(remoteByCode.COURIER).toBeUndefined();
     expect(remoteByCode.CDEK).toBe(true);
   });
 
