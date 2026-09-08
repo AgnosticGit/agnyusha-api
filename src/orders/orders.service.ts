@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -8,9 +9,26 @@ import { DeliveryMethodCode, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentsService } from '../payments/payments.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
+import { CdekService } from '../cdek/cdek.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import type { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
 import { isInventoryEnabled } from '../common/inventory';
+
+const DELIVERY_SYNC_TTL_MS = 3 * 60 * 1000;
+
+const FINAL_DELIVERY_STATUS_CODES = new Set([
+  'DELIVERED',
+  'NOT_DELIVERED',
+  'REMOVED',
+  'INVALID',
+  'DESTROYED',
+  'DELIVERED_FINISH',
+  'RETURNED_FINISH',
+  'CANCELLED',
+  'CANCELLED_USER',
+  'SORTING_CENTER_CANCELLED',
+  'DELIVERY_TRACKING_FINISHED',
+]);
 
 function estimateWeightGrams(weight: string): number {
   const normalized = weight.replace(',', '.').toLowerCase();
@@ -22,6 +40,10 @@ function estimateWeightGrams(weight: string): number {
     return Math.max(100, Math.round(value));
   }
   return Math.max(100, Math.round(value * 1000));
+}
+
+function cdekTrackingUrl(trackNumber: string) {
+  return `https://www.cdek.ru/ru/tracking?order_id=${encodeURIComponent(trackNumber)}`;
 }
 
 type ResolvedLine = {
@@ -36,9 +58,12 @@ type ResolvedLine = {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly yandex: YandexDeliveryService,
+    private readonly cdek: CdekService,
     private readonly payments: PaymentsService,
     private readonly config: ConfigService,
   ) {}
@@ -131,6 +156,47 @@ export class OrdersService {
       }
     }
 
+    if (deliveryCode === DeliveryMethodCode.CDEK) {
+      if (!pickupCode) {
+        throw new BadRequestException('Выберите пункт выдачи СДЭК');
+      }
+      if (!this.cdek.isOrderCreationConfigured()) {
+        throw new BadRequestException(
+          'Оформление через СДЭК временно недоступно',
+        );
+      }
+    }
+
+    let deliveryTrackNumber: string | null = null;
+    let deliveryTrackingUrl: string | null = null;
+
+    if (
+      deliveryCode === DeliveryMethodCode.CDEK &&
+      pickupCode &&
+      !payEnabled &&
+      this.cdek.isOrderCreationConfigured()
+    ) {
+      const cdekOrder = await this.cdek.createPickupOrder({
+        orderNumber: `agny-${Date.now().toString(36)}`,
+        deliveryPointCode: pickupCode,
+        phone: dto.phone,
+        recipientName: 'Покупатель',
+        comment: `Заказ Агнюша · ${dto.cityLabel}`,
+        items: resolvedItems.map((item) => ({
+          name: item.productName,
+          wareKey: item.variantId,
+          price: item.price,
+          qty: item.qty,
+          weightGrams: estimateWeightGrams(item.weight),
+        })),
+      });
+      externalDeliveryId = cdekOrder.uuid;
+      deliveryTrackNumber = cdekOrder.cdekNumber;
+      deliveryTrackingUrl = cdekOrder.cdekNumber
+        ? cdekTrackingUrl(cdekOrder.cdekNumber)
+        : null;
+    }
+
     const order = await this.prisma.$transaction(async (tx) => {
       if (this.inventoryOn()) {
         for (const item of resolvedItems) {
@@ -161,6 +227,8 @@ export class OrdersService {
           pickupLabel: dto.pickupLabel?.trim() || null,
           pickupCode,
           externalDeliveryId,
+          deliveryTrackNumber,
+          deliveryTrackingUrl,
           total,
           items: {
             create: resolvedItems.map((i) => ({
@@ -249,8 +317,13 @@ export class OrdersService {
       this.prisma.order.count({ where }),
     ]);
 
+    const items: Array<ReturnType<OrdersService['map']>> = [];
+    for (const order of orders) {
+      items.push(this.map(await this.syncDeliveryTracking(order)));
+    }
+
     return {
-      items: orders.map((o) => this.map(o)),
+      items,
       total,
       page,
       limit,
@@ -269,7 +342,7 @@ export class OrdersService {
       },
     });
     if (!order) throw new NotFoundException('Заказ не найден');
-    return this.map(order);
+    return this.map(await this.syncDeliveryTracking(order));
   }
 
   /** Resume Ozon Pay for an unpaid order owned by the user. */
@@ -458,6 +531,84 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Poll CDEK/Yandex for tracking when TTL expired.
+   * Safe on every list/get — skips when fresh or terminal.
+   */
+  async syncDeliveryTracking<
+    T extends {
+      id: string;
+      deliveryCode: string;
+      externalDeliveryId: string | null;
+      deliveryTrackNumber: string | null;
+      deliveryStatusCode: string | null;
+      deliveryStatusLabel: string | null;
+      deliveryTrackingUrl: string | null;
+      deliveryStatusAt: Date | null;
+    },
+  >(order: T): Promise<T> {
+    if (!order.externalDeliveryId) return order;
+    if (
+      order.deliveryCode !== DeliveryMethodCode.CDEK &&
+      order.deliveryCode !== DeliveryMethodCode.YANDEX
+    ) {
+      return order;
+    }
+    if (
+      order.deliveryStatusCode &&
+      FINAL_DELIVERY_STATUS_CODES.has(order.deliveryStatusCode)
+    ) {
+      return order;
+    }
+    if (
+      order.deliveryStatusAt &&
+      Date.now() - order.deliveryStatusAt.getTime() < DELIVERY_SYNC_TTL_MS
+    ) {
+      return order;
+    }
+
+    try {
+      if (order.deliveryCode === DeliveryMethodCode.CDEK) {
+        const info = await this.cdek.getOrder(order.externalDeliveryId);
+        const trackNumber = info.cdekNumber || order.deliveryTrackNumber;
+        const updated = await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            deliveryTrackNumber: trackNumber,
+            deliveryStatusCode: info.statusCode,
+            deliveryStatusLabel: info.statusLabel,
+            deliveryTrackingUrl: trackNumber
+              ? cdekTrackingUrl(trackNumber)
+              : order.deliveryTrackingUrl,
+            deliveryStatusAt: new Date(),
+          },
+        });
+        return { ...order, ...updated };
+      }
+
+      const info = await this.yandex.getRequestInfo(order.externalDeliveryId);
+      const updated = await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          deliveryTrackNumber:
+            order.deliveryTrackNumber || order.externalDeliveryId,
+          deliveryStatusCode: info.statusCode,
+          deliveryStatusLabel: info.statusLabel || info.statusCode,
+          deliveryTrackingUrl: info.sharingUrl || order.deliveryTrackingUrl,
+          deliveryStatusAt: new Date(),
+        },
+      });
+      return { ...order, ...updated };
+    } catch (err) {
+      this.logger.warn(
+        `Delivery tracking sync failed for order ${order.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return order;
+    }
+  }
+
   private mapAdmin(
     order: Parameters<OrdersService['map']>[0] & {
       user?: { email: string } | null;
@@ -480,6 +631,11 @@ export class OrdersService {
     pickupLabel: string | null;
     pickupCode?: string | null;
     externalDeliveryId?: string | null;
+    deliveryTrackNumber?: string | null;
+    deliveryStatusCode?: string | null;
+    deliveryStatusLabel?: string | null;
+    deliveryTrackingUrl?: string | null;
+    deliveryStatusAt?: Date | null;
     paymentExternalId?: string | null;
     paymentPayLink?: string | null;
     paidAt?: Date | null;
@@ -497,6 +653,12 @@ export class OrdersService {
       product?: { slug: string; isActive: boolean } | null;
     }>;
   }) {
+    const hasTracking =
+      Boolean(order.externalDeliveryId) ||
+      Boolean(order.deliveryTrackNumber) ||
+      Boolean(order.deliveryStatusLabel) ||
+      Boolean(order.deliveryTrackingUrl);
+
     return {
       id: order.id,
       status: order.status,
@@ -508,6 +670,15 @@ export class OrdersService {
       pickupLabel: order.pickupLabel,
       pickupCode: order.pickupCode ?? null,
       externalDeliveryId: order.externalDeliveryId ?? null,
+      deliveryTracking: hasTracking
+        ? {
+            trackNumber: order.deliveryTrackNumber ?? null,
+            statusCode: order.deliveryStatusCode ?? null,
+            statusLabel: order.deliveryStatusLabel ?? null,
+            trackingUrl: order.deliveryTrackingUrl ?? null,
+            syncedAt: order.deliveryStatusAt?.toISOString() ?? null,
+          }
+        : null,
       paymentExternalId: order.paymentExternalId ?? null,
       paidAt: order.paidAt ?? null,
       payUrl:

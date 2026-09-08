@@ -54,6 +54,21 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
             postal_code: '191186',
           },
           position: { latitude: 59.93, longitude: 30.33 },
+          schedule: {
+            time_zone: 3,
+            restrictions: [
+              {
+                days: [1, 2, 3, 4, 5],
+                time_from: { hours: 10, minutes: 0 },
+                time_to: { hours: 20, minutes: 0 },
+              },
+              {
+                days: [6],
+                time_from: { hours: 11, minutes: 0 },
+                time_to: { hours: 18, minutes: 0 },
+              },
+            ],
+          },
           payment_methods: ['already_paid', 'card_on_receipt'],
         };
         return jsonResponse({
@@ -143,6 +158,9 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
         code: 'ya-spb-1',
         name: 'Яндекс ПВЗ Невский',
         address: 'Невский пр., 10',
+        workTime: 'Пн-Пт 10:00-20:00, Сб 11:00-18:00',
+        latitude: 59.93,
+        longitude: 30.33,
       }),
     ]);
   });

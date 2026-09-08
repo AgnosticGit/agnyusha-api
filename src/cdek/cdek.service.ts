@@ -221,6 +221,181 @@ export class CdekService {
     return (await res.json()) as T;
   }
 
+  private async cdekPost<T>(
+    path: string,
+    body: unknown,
+    retried = false,
+  ): Promise<T> {
+    const token = await this.getAccessToken();
+    const res = await this.fetchFn(`${this.baseUrl}/v2${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (res.status === 401 && !retried) {
+      this.logger.warn(`CDEK ${path} returned 401 — refreshing token`);
+      this.tokenCache = null;
+      await this.getAccessToken(true);
+      return this.cdekPost<T>(path, body, true);
+    }
+
+    if (!res.ok) {
+      const detail = await this.readErrorBody(res);
+      this.logger.error(
+        `CDEK ${path} failed with status ${res.status}${detail ? `: ${detail}` : ''}`,
+      );
+      throw new ServiceUnavailableException(
+        'Служба доставки временно недоступна',
+      );
+    }
+
+    return (await res.json()) as T;
+  }
+
+  private get fromLocation() {
+    return this.config.get<string>('CDEK_FROM_LOCATION')?.trim() || '';
+  }
+
+  private get tariffCode() {
+    const raw = this.config.get<string>('CDEK_TARIFF_CODE')?.trim();
+    const n = raw ? Number(raw) : 136;
+    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 136;
+  }
+
+  isOrderCreationConfigured() {
+    return this.isConfigured() && Boolean(this.fromLocation);
+  }
+
+  async createPickupOrder(input: {
+    orderNumber: string;
+    deliveryPointCode: string;
+    phone: string;
+    recipientName: string;
+    comment?: string;
+    items: Array<{
+      name: string;
+      wareKey: string;
+      price: number;
+      qty: number;
+      weightGrams: number;
+    }>;
+  }): Promise<{ uuid: string; cdekNumber: string | null }> {
+    this.assertConfigured();
+    if (!this.fromLocation) {
+      throw new ServiceUnavailableException(
+        'Служба доставки временно недоступна',
+      );
+    }
+    const deliveryPoint = input.deliveryPointCode.trim();
+    if (!deliveryPoint) {
+      throw new ServiceUnavailableException(
+        'Служба доставки временно недоступна',
+      );
+    }
+
+    const weight = Math.max(
+      100,
+      input.items.reduce((sum, i) => sum + i.weightGrams * i.qty, 0),
+    );
+    const phoneDigits = input.phone.replace(/\D/g, '');
+    const phone =
+      phoneDigits.length >= 10
+        ? `+${phoneDigits.replace(/^8/, '7')}`
+        : input.phone;
+
+    const data = await this.cdekPost<{
+      entity?: { uuid?: string; cdek_number?: string | number | null };
+    }>('/orders', {
+      type: 1,
+      number: input.orderNumber.slice(0, 40),
+      tariff_code: this.tariffCode,
+      shipment_point: this.fromLocation,
+      delivery_point: deliveryPoint,
+      comment: input.comment?.slice(0, 255) || undefined,
+      recipient: {
+        name: input.recipientName.slice(0, 255) || 'Покупатель',
+        phones: [{ number: phone }],
+      },
+      packages: [
+        {
+          number: '1',
+          weight,
+          items: input.items.map((item, idx) => ({
+            name: item.name.slice(0, 255),
+            ware_key: item.wareKey.slice(0, 50) || `item-${idx + 1}`,
+            payment: { value: 0 },
+            cost: Math.max(0, Number(item.price.toFixed(2))),
+            weight: Math.max(1, item.weightGrams),
+            amount: item.qty,
+          })),
+        },
+      ],
+    });
+
+    const uuid = data.entity?.uuid?.trim();
+    if (!uuid) {
+      this.logger.error('CDEK create order response missing uuid');
+      throw new ServiceUnavailableException(
+        'Служба доставки временно недоступна',
+      );
+    }
+
+    const rawNumber = data.entity?.cdek_number;
+    const cdekNumber =
+      rawNumber == null || rawNumber === ''
+        ? null
+        : String(rawNumber).trim() || null;
+
+    return { uuid, cdekNumber };
+  }
+
+  async getOrder(uuid: string): Promise<{
+    uuid: string;
+    cdekNumber: string | null;
+    statusCode: string | null;
+    statusLabel: string | null;
+  }> {
+    this.assertConfigured();
+    const id = uuid.trim();
+    if (!id) {
+      throw new ServiceUnavailableException(
+        'Служба доставки временно недоступна',
+      );
+    }
+
+    const data = await this.cdekGet<{
+      entity?: {
+        uuid?: string;
+        cdek_number?: string | number | null;
+        statuses?: Array<{
+          code?: string;
+          name?: string;
+        }>;
+      };
+    }>(`/orders/${encodeURIComponent(id)}`, {});
+
+    const entity = data.entity;
+    const statuses = Array.isArray(entity?.statuses) ? entity!.statuses! : [];
+    const latest = statuses[0];
+    const rawNumber = entity?.cdek_number;
+    const cdekNumber =
+      rawNumber == null || rawNumber === ''
+        ? null
+        : String(rawNumber).trim() || null;
+
+    return {
+      uuid: entity?.uuid?.trim() || id,
+      cdekNumber,
+      statusCode: latest?.code?.trim() || null,
+      statusLabel: latest?.name?.trim() || null,
+    };
+  }
+
   async suggestCities(name: string, limit = 12) {
     const query = sanitizeSearchName(name);
     if (query.length < 2) return [];
@@ -266,7 +441,7 @@ export class CdekService {
         city: p.location?.city || '',
         region: p.location?.region || '',
         postalCode: p.location?.postal_code || null,
-        workTime: p.work_time || null,
+        workTime: normalizeWorkTime(p.work_time),
         latitude: p.location?.latitude ?? null,
         longitude: p.location?.longitude ?? null,
         haveCash: Boolean(p.have_cash),
@@ -277,4 +452,15 @@ export class CdekService {
           .join(' — '),
       }));
   }
+}
+
+function normalizeWorkTime(value?: string | null) {
+  if (!value) return null;
+  const oneLine = value
+    .replace(/[\r\n]+/g, ', ')
+    .replace(/\s*;\s*/g, ', ')
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return oneLine || null;
 }

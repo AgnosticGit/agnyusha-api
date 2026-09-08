@@ -9,8 +9,13 @@ import { ConfigService } from '@nestjs/config';
 import { DeliveryMethodCode, OrderStatus } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { SlidingWindowRateLimiter } from '../common/rate-limit';
+
+function cdekTrackingUrl(trackNumber: string) {
+  return `https://www.cdek.ru/ru/tracking?order_id=${encodeURIComponent(trackNumber)}`;
+}
 
 export type OzonPaymentLine = {
   extId: string;
@@ -33,6 +38,7 @@ export class PaymentsService {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly yandex: YandexDeliveryService,
+    private readonly cdek: CdekService,
   ) {}
 
   isConfigured(): boolean {
@@ -313,6 +319,9 @@ export class PaymentsService {
     }
 
     let externalDeliveryId = order.externalDeliveryId;
+    let deliveryTrackNumber = order.deliveryTrackNumber;
+    let deliveryTrackingUrl = order.deliveryTrackingUrl;
+
     if (
       order.status !== OrderStatus.CANCELLED &&
       order.deliveryCode === DeliveryMethodCode.YANDEX &&
@@ -336,9 +345,46 @@ export class PaymentsService {
           })),
         });
         externalDeliveryId = yandexOrder.requestId;
+        deliveryTrackNumber = deliveryTrackNumber || yandexOrder.requestId;
       } catch (err) {
         this.logger.error(
           `Yandex create after pay failed for ${order.id}: ${
+            err instanceof Error ? err.message : 'unknown'
+          }`,
+        );
+      }
+    }
+
+    if (
+      order.status !== OrderStatus.CANCELLED &&
+      order.deliveryCode === DeliveryMethodCode.CDEK &&
+      order.pickupCode &&
+      !externalDeliveryId &&
+      this.cdek.isOrderCreationConfigured()
+    ) {
+      try {
+        const cdekOrder = await this.cdek.createPickupOrder({
+          orderNumber: `agny-pay-${order.id.slice(-12)}`,
+          deliveryPointCode: order.pickupCode,
+          phone: order.phone,
+          recipientName: 'Покупатель',
+          comment: `Заказ Агнюша · ${order.cityLabel}`,
+          items: order.items.map((item) => ({
+            name: item.productName,
+            wareKey: item.variantId ?? item.id,
+            price: item.price,
+            qty: item.qty,
+            weightGrams: 800,
+          })),
+        });
+        externalDeliveryId = cdekOrder.uuid;
+        deliveryTrackNumber = cdekOrder.cdekNumber || deliveryTrackNumber;
+        deliveryTrackingUrl = cdekOrder.cdekNumber
+          ? cdekTrackingUrl(cdekOrder.cdekNumber)
+          : deliveryTrackingUrl;
+      } catch (err) {
+        this.logger.error(
+          `CDEK create after pay failed for ${order.id}: ${
             err instanceof Error ? err.message : 'unknown'
           }`,
         );
@@ -356,6 +402,8 @@ export class PaymentsService {
         paidAt: new Date(),
         paymentExternalId: ozonId ?? order.paymentExternalId,
         externalDeliveryId,
+        deliveryTrackNumber,
+        deliveryTrackingUrl,
       },
     });
     this.logger.log(`Order ${order.id} marked PAID`);

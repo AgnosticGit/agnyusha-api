@@ -108,6 +108,70 @@ function formatAddress(
   };
 }
 
+const YANDEX_DAY_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+function formatClock(part?: { hours?: number; minutes?: number } | null) {
+  if (part?.hours == null || !Number.isFinite(part.hours)) return null;
+  const hours = Math.min(23, Math.max(0, Math.trunc(part.hours)));
+  const minutes = Math.min(
+    59,
+    Math.max(0, Math.trunc(part.minutes ?? 0)),
+  );
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function formatDayRange(days: number[]) {
+  const sorted = [
+    ...new Set(days.filter((d) => Number.isInteger(d) && d >= 1 && d <= 7)),
+  ].sort((a, b) => a - b);
+  if (!sorted.length) return '';
+
+  const ranges: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i += 1) {
+    const day = sorted[i];
+    if (day === prev + 1) {
+      prev = day;
+      continue;
+    }
+    ranges.push(
+      start === prev
+        ? YANDEX_DAY_SHORT[start]
+        : `${YANDEX_DAY_SHORT[start]}-${YANDEX_DAY_SHORT[prev]}`,
+    );
+    start = day;
+    prev = day;
+  }
+  return ranges.join(', ');
+}
+
+/** Turn Yandex schedule.restrictions into a CDEK-like workTime string. */
+export function formatYandexWorkTime(
+  schedule?: YandexPickupPoint['schedule'],
+): string | null {
+  if (!schedule?.restrictions?.length) return null;
+
+  const parts: string[] = [];
+  for (const row of schedule.restrictions) {
+    const days = (row.days || []).filter(
+      (d): d is number => typeof d === 'number',
+    );
+    const dayLabel = formatDayRange(days);
+    const from = formatClock(row.time_from);
+    const to = formatClock(row.time_to);
+    if (!dayLabel && !from) continue;
+    if (from && to) {
+      parts.push(dayLabel ? `${dayLabel} ${from}-${to}` : `${from}-${to}`);
+    } else if (from) {
+      parts.push(dayLabel ? `${dayLabel} с ${from}` : `с ${from}`);
+    } else {
+      parts.push(dayLabel);
+    }
+  }
+  return parts.length ? parts.join(', ') : null;
+}
+
 function normalizeRuPhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
   if (digits.length === 11 && digits.startsWith('8')) {
@@ -279,7 +343,7 @@ export class YandexDeliveryService {
         city: address.city,
         region: address.region,
         postalCode: address.postalCode,
-        workTime: null,
+        workTime: formatYandexWorkTime(p.schedule),
         latitude: p.position?.latitude ?? null,
         longitude: p.position?.longitude ?? null,
         paymentMethods: p.payment_methods || [],
@@ -287,6 +351,35 @@ export class YandexDeliveryService {
       });
     }
     return points;
+  }
+
+  async getRequestInfo(requestId: string): Promise<{
+    requestId: string;
+    statusCode: string | null;
+    statusLabel: string | null;
+    sharingUrl: string | null;
+  }> {
+    this.assertConfigured();
+    const id = requestId.trim();
+    if (!id) {
+      throw new BadRequestException('Не указан идентификатор доставки');
+    }
+
+    const data = await this.yandexRequest<{
+      request_id?: string;
+      state?: { status?: string; description?: string };
+      sharing_url?: string;
+    }>(
+      `/api/b2b/platform/request/info?request_id=${encodeURIComponent(id)}`,
+      { method: 'GET' },
+    );
+
+    return {
+      requestId: data.request_id?.trim() || id,
+      statusCode: data.state?.status?.trim() || null,
+      statusLabel: data.state?.description?.trim() || null,
+      sharingUrl: data.sharing_url?.trim() || null,
+    };
   }
 
   async createPickupOrder(

@@ -185,24 +185,29 @@ model CartItem {
 }
 
 model Order {
-  id                 String      @id @default(cuid())
-  userId             String?     @map("user_id")
-  status             OrderStatus @default(NEW)
-  phone              String
-  contactChannel     String      @map("contact_channel")
-  cityLabel          String      @map("city_label")
-  deliveryCode       String      @map("delivery_code")
-  deliveryTitle      String      @map("delivery_title")
-  pickupLabel        String?     @map("pickup_label")
-  pickupCode         String?     @map("pickup_code")
-  externalDeliveryId String?     @map("external_delivery_id")
-  paymentExternalId  String?     @map("payment_external_id")
-  paymentPayLink     String?     @map("payment_pay_link")
-  paidAt             DateTime?   @map("paid_at")
-  total              Float
-  createdAt          DateTime    @default(now()) @map("created_at")
-  user               User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
-  items              OrderItem[]
+  id                   String      @id @default(cuid())
+  userId               String?     @map("user_id")
+  status               OrderStatus @default(NEW)
+  phone                String
+  contactChannel       String      @map("contact_channel")
+  cityLabel            String      @map("city_label")
+  deliveryCode         String      @map("delivery_code")
+  deliveryTitle        String      @map("delivery_title")
+  pickupLabel          String?     @map("pickup_label")
+  pickupCode           String?     @map("pickup_code")
+  externalDeliveryId   String?     @map("external_delivery_id")
+  deliveryTrackNumber  String?     @map("delivery_track_number")
+  deliveryStatusCode   String?     @map("delivery_status_code")
+  deliveryStatusLabel  String?     @map("delivery_status_label")
+  deliveryTrackingUrl  String?     @map("delivery_tracking_url")
+  deliveryStatusAt     DateTime?   @map("delivery_status_at")
+  paymentExternalId    String?     @map("payment_external_id")
+  paymentPayLink       String?     @map("payment_pay_link")
+  paidAt               DateTime?   @map("paid_at")
+  total                Float
+  createdAt            DateTime    @default(now()) @map("created_at")
+  user                 User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  items                OrderItem[]
 
   @@index([userId, createdAt])
   @@index([createdAt])
