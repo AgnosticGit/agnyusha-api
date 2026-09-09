@@ -2,8 +2,10 @@ import { Type } from 'class-transformer';
 import {
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -40,4 +42,30 @@ export class YandexPointsQueryDto {
   @IsOptional()
   @IsIn(['pickup_point', 'terminal', 'warehouse'])
   type?: 'pickup_point' | 'terminal' | 'warehouse';
+}
+
+export class PochtaPointsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lon?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  settlement?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  region?: string;
 }

@@ -11,6 +11,12 @@ const DELIVERY_ENV_KEYS = [
   'YANDEX_DELIVERY_API_URL',
   'YANDEX_DELIVERY_TOKEN',
   'YANDEX_PLATFORM_STATION_ID',
+  'POCHTA_API_URL',
+  'POCHTA_ACCESS_TOKEN',
+  'POCHTA_AUTHORIZATION_KEY',
+  'POCHTA_MAIL_TYPE',
+  'POCHTA_MAIL_CATEGORY',
+  'POCHTA_FROM_INDEX',
 ] as const;
 
 function parseEnvFile(content: string): Record<string, string> {

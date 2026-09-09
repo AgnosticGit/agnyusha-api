@@ -26,6 +26,8 @@ describe('load-env', () => {
         'CDEK_CLIENT_SECRET=prod-secret',
         'CDEK_FROM_LOCATION=SPB36',
         'CDEK_TARIFF_CODE=136',
+        'POCHTA_ACCESS_TOKEN=prod-pochta-token',
+        'POCHTA_FROM_INDEX=190000',
         'CORS_ORIGIN=http://should-not-touch',
       ].join('\n'),
       'utf8',
@@ -36,6 +38,7 @@ describe('load-env', () => {
       CDEK_API_URL: 'https://api.edu.cdek.ru',
       CDEK_FROM_LOCATION: 'MSK65',
       CDEK_CLIENT_ID: 'edu-id',
+      POCHTA_ACCESS_TOKEN: 'dev-pochta',
       CORS_ORIGIN: 'https://ngrok.example',
     };
 
@@ -44,6 +47,8 @@ describe('load-env', () => {
     expect(env.CDEK_API_URL).toBe('https://api.cdek.ru');
     expect(env.CDEK_FROM_LOCATION).toBe('SPB36');
     expect(env.CDEK_CLIENT_ID).toBe('prod-id');
+    expect(env.POCHTA_ACCESS_TOKEN).toBe('prod-pochta-token');
+    expect(env.POCHTA_FROM_INDEX).toBe('190000');
     expect(env.CORS_ORIGIN).toBe('https://ngrok.example');
   });
 

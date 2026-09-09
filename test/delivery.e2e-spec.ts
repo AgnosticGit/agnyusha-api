@@ -46,7 +46,7 @@ describe('Delivery methods (e2e)', () => {
     expect(byCode.COURIER).toBeUndefined();
     expect(byCode.CDEK).toBe(true);
     expect(byCode.YANDEX).toBe(false);
-    expect(byCode.POST).toBe(true);
+    expect(byCode.POST).toBe(false);
     expect(local.body.map((m: { code: string }) => m.code)).toEqual([
       'CDEK',
       'YANDEX',
@@ -71,6 +71,7 @@ describe('Delivery methods (e2e)', () => {
     expect(remoteByCode.PICKUP).toBe(false);
     expect(remoteByCode.COURIER).toBeUndefined();
     expect(remoteByCode.CDEK).toBe(true);
+    expect(remoteByCode.POST).toBe(false);
   });
 
   it('returns unavailable methods when location is missing', async () => {

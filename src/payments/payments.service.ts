@@ -12,6 +12,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
+import { PochtaService, pochtaTrackingUrl } from '../pochta/pochta.service';
 import { SlidingWindowRateLimiter } from '../common/rate-limit';
 import { resolveWeightGrams } from '../common/weight';
 import { formatPersonName } from '../common/person-name';
@@ -50,6 +51,7 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly yandex: YandexDeliveryService,
     private readonly cdek: CdekService,
+    private readonly pochta: PochtaService,
     @Inject(MAIL_SEND) private readonly sendMail: MailSend,
   ) {}
 
@@ -616,6 +618,50 @@ export class PaymentsService {
       } catch (err) {
         this.logger.error(
           `CDEK create after pay failed for ${order.id}: ${
+            err instanceof Error ? err.message : 'unknown'
+          }`,
+        );
+      }
+    }
+
+    if (
+      order.status !== OrderStatus.CANCELLED &&
+      order.deliveryCode === DeliveryMethodCode.POST &&
+      order.pickupCode &&
+      !externalDeliveryId &&
+      this.pochta.isOrderCreationConfigured()
+    ) {
+      try {
+        const pochtaOrder = await this.pochta.createPickupOrder({
+          orderNumber: `agny-pay-${order.id.slice(-12)}`,
+          deliveryPointCode: order.pickupCode,
+          phone: order.phone,
+          recipientName: formatPersonName(order),
+          lastName: order.lastName,
+          firstName: order.firstName,
+          middleName: order.middleName ?? undefined,
+          comment: `Заказ Агнюша · ${order.cityLabel}`,
+          cityLabel: order.cityLabel,
+          items: order.items.map((item) => ({
+            name: item.productName,
+            wareKey: item.variantId ?? item.id,
+            price: item.price,
+            qty: item.qty,
+            weightGrams: resolveWeightGrams(item.weightGrams, item.weight),
+          })),
+        });
+        externalDeliveryId = pochtaOrder.orderId;
+        deliveryTrackNumber = pochtaOrder.barcode || deliveryTrackNumber;
+        deliveryTrackingUrl = pochtaOrder.barcode
+          ? pochtaTrackingUrl(pochtaOrder.barcode)
+          : deliveryTrackingUrl;
+        this.logger.log(
+          `Pochta shipment after pay for ${order.id}: id=${externalDeliveryId}` +
+            (pochtaOrder.barcode ? ` track=${pochtaOrder.barcode}` : ''),
+        );
+      } catch (err) {
+        this.logger.error(
+          `Pochta create after pay failed for ${order.id}: ${
             err instanceof Error ? err.message : 'unknown'
           }`,
         );

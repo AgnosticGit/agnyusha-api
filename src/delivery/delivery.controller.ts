@@ -2,9 +2,11 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { DeliveryService } from './delivery.service';
 import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
+import { PochtaService } from '../pochta/pochta.service';
 import {
   DeliveryMethodsQueryDto,
   DeliveryPointsQueryDto,
+  PochtaPointsQueryDto,
   YandexPointsQueryDto,
 } from './dto/delivery-query.dto';
 
@@ -14,6 +16,7 @@ export class DeliveryController {
     private readonly deliveryService: DeliveryService,
     private readonly cdek: CdekService,
     private readonly yandex: YandexDeliveryService,
+    private readonly pochta: PochtaService,
   ) {}
 
   @Get('delivery-methods')
@@ -29,5 +32,15 @@ export class DeliveryController {
   @Get('yandex/delivery-points')
   yandexPoints(@Query() query: YandexPointsQueryDto) {
     return this.yandex.deliveryPoints(query.geoId, query.type);
+  }
+
+  @Get('pochta/delivery-points')
+  pochtaPoints(@Query() query: PochtaPointsQueryDto) {
+    return this.pochta.deliveryPoints({
+      lat: query.lat,
+      lon: query.lon,
+      settlement: query.settlement,
+      region: query.region,
+    });
   }
 }

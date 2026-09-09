@@ -3,6 +3,7 @@ import { DeliveryMethodCode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
+import { PochtaService } from '../pochta/pochta.service';
 
 function isLocalArea(...parts: Array<string | undefined>) {
   const text = parts.filter(Boolean).join(' ').toLowerCase();
@@ -24,6 +25,7 @@ export class DeliveryService {
     private readonly prisma: PrismaService,
     private readonly cdek: CdekService,
     private readonly yandex: YandexDeliveryService,
+    private readonly pochta: PochtaService,
   ) {}
 
   list() {
@@ -47,6 +49,7 @@ export class DeliveryService {
 
     const local = isLocalArea(region, label);
     const cdekReady = this.cdek.isConfigured();
+    const pochtaReady = this.pochta.isConfigured();
 
     return methods.map((m) => {
       if (m.code === DeliveryMethodCode.PICKUP) {
@@ -79,6 +82,15 @@ export class DeliveryService {
             : moscowOnly && !isMoscowArea(region, label)
               ? 'В тестовой среде Яндекс доступен только для Москвы'
               : 'Выберите пункт выдачи Яндекс Доставки',
+        };
+      }
+      if (m.code === DeliveryMethodCode.POST) {
+        return {
+          ...m,
+          available: pochtaReady,
+          note: pochtaReady
+            ? 'Выберите отделение Почты России'
+            : 'Почта России временно недоступна',
         };
       }
       return {

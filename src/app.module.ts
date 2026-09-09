@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
 import { CdekModule } from './cdek/cdek.module';
 import { YandexModule } from './yandex/yandex.module';
+import { PochtaModule } from './pochta/pochta.module';
 import { CitiesModule } from './cities/cities.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { AuthModule } from './auth/auth.module';
@@ -23,6 +24,7 @@ import { HealthModule } from './health/health.module';
     PrismaModule,
     CdekModule,
     YandexModule,
+    PochtaModule,
     CitiesModule,
     DeliveryModule,
     AuthModule,

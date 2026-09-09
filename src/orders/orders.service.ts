@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PaymentsService } from '../payments/payments.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { CdekService } from '../cdek/cdek.service';
+import { PochtaService, pochtaTrackingUrl } from '../pochta/pochta.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import type { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
 import { isInventoryEnabled } from '../common/inventory';
@@ -20,6 +21,7 @@ import { formatPersonName, normalizeEmail } from '../common/person-name';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
 import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
+import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
 import { orderStatusAfterCarrierGone } from './order-status.util';
 
 const DELIVERY_SYNC_TTL_MS = 3 * 60 * 1000;
@@ -61,6 +63,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly yandex: YandexDeliveryService,
     private readonly cdek: CdekService,
+    private readonly pochta: PochtaService,
     private readonly payments: PaymentsService,
     private readonly config: ConfigService,
     @Inject(MAIL_SEND) private readonly sendMail: MailSend,
@@ -273,6 +276,17 @@ export class OrdersService {
       }
     }
 
+    if (deliveryCode === DeliveryMethodCode.POST) {
+      if (!pickupCode) {
+        throw new BadRequestException('Выберите отделение Почты России');
+      }
+      if (!this.pochta.isOrderCreationConfigured()) {
+        throw new BadRequestException(
+          'Оформление через Почту России временно недоступно',
+        );
+      }
+    }
+
     let deliveryTrackNumber: string | null = null;
     let deliveryTrackingUrl: string | null = null;
 
@@ -300,6 +314,37 @@ export class OrdersService {
       deliveryTrackNumber = cdekOrder.cdekNumber;
       deliveryTrackingUrl = cdekOrder.cdekNumber
         ? cdekTrackingUrl(cdekOrder.cdekNumber)
+        : null;
+    }
+
+    if (
+      deliveryCode === DeliveryMethodCode.POST &&
+      pickupCode &&
+      !payEnabled &&
+      this.pochta.isOrderCreationConfigured()
+    ) {
+      const pochtaOrder = await this.pochta.createPickupOrder({
+        orderNumber: `agny-${Date.now().toString(36)}`,
+        deliveryPointCode: pickupCode,
+        phone,
+        recipientName,
+        lastName,
+        firstName,
+        middleName,
+        comment: `Заказ Агнюша · ${dto.cityLabel}`,
+        cityLabel: dto.cityLabel,
+        items: resolvedItems.map((item) => ({
+          name: item.productName,
+          wareKey: item.variantId,
+          price: item.price,
+          qty: item.qty,
+          weightGrams: item.weightGrams,
+        })),
+      });
+      externalDeliveryId = pochtaOrder.orderId;
+      deliveryTrackNumber = pochtaOrder.barcode;
+      deliveryTrackingUrl = pochtaOrder.barcode
+        ? pochtaTrackingUrl(pochtaOrder.barcode)
         : null;
     }
 
@@ -703,7 +748,8 @@ export class OrdersService {
     if (!order.externalDeliveryId) return order;
     if (
       order.deliveryCode !== DeliveryMethodCode.CDEK &&
-      order.deliveryCode !== DeliveryMethodCode.YANDEX
+      order.deliveryCode !== DeliveryMethodCode.YANDEX &&
+      order.deliveryCode !== DeliveryMethodCode.POST
     ) {
       return order;
     }
@@ -740,6 +786,24 @@ export class OrdersService {
         return { ...order, ...updated };
       }
 
+      if (order.deliveryCode === DeliveryMethodCode.POST) {
+        const info = await this.pochta.getOrder(order.externalDeliveryId);
+        const trackNumber = info.barcode || order.deliveryTrackNumber;
+        const updated = await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            deliveryTrackNumber: trackNumber,
+            deliveryStatusCode: info.statusCode,
+            deliveryStatusLabel: info.statusLabel,
+            deliveryTrackingUrl: trackNumber
+              ? pochtaTrackingUrl(trackNumber)
+              : order.deliveryTrackingUrl,
+            deliveryStatusAt: new Date(),
+          },
+        });
+        return { ...order, ...updated };
+      }
+
       const info = await this.yandex.getRequestInfo(order.externalDeliveryId);
       const updated = await this.prisma.order.update({
         where: { id: order.id },
@@ -756,6 +820,9 @@ export class OrdersService {
     } catch (err) {
       if (err instanceof CdekEntityNotFoundError) {
         return this.markCarrierShipmentGone(order, 'СДЭК');
+      }
+      if (err instanceof PochtaEntityNotFoundError) {
+        return this.markCarrierShipmentGone(order, 'Почта России');
       }
       this.logger.warn(
         `Delivery tracking sync failed for order ${order.id}: ${
