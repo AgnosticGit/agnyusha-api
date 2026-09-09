@@ -48,11 +48,8 @@ export function applyTestDeliveryEnv(options?: {
   if (ozon === 'present') {
     process.env.OZON_PAY_ACCESS_KEY =
       process.env.OZON_PAY_ACCESS_KEY || 'test-access-key';
-    process.env.OZON_PAY_SECRET_KEY =
-      process.env.OZON_PAY_SECRET_KEY || 'test-secret-key';
   } else {
     process.env.OZON_PAY_ACCESS_KEY = '';
-    process.env.OZON_PAY_SECRET_KEY = '';
   }
 
   if (cdek === 'present') {

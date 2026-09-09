@@ -28,6 +28,7 @@ if (!domain) {
 
 const publicUrl = `https://${domain}`;
 
+/** Parse KEY=VALUE lines; later used to beat IDE-injected .env (edu) pollution. */
 function parseEnvFile(filePath) {
   if (!existsSync(filePath)) return {};
   const out = {};
@@ -49,31 +50,55 @@ function parseEnvFile(filePath) {
   return out;
 }
 
-const developmentFileEnv = parseEnvFile(join(apiRoot, ".env.development"));
+const productionFileEnv = parseEnvFile(join(apiRoot, ".env.production"));
 
-console.log(`api dev:ngrok → ${publicUrl}`);
-if (developmentFileEnv.CDEK_API_URL) {
+console.log(`api prod:ngrok → build + start @ ${publicUrl}`);
+if (productionFileEnv.CDEK_API_URL) {
   console.log(
-    `CDEK from .env.development: ${developmentFileEnv.CDEK_API_URL} · ${developmentFileEnv.CDEK_FROM_LOCATION || "(no FROM)"}`,
+    `CDEK from .env.production: ${productionFileEnv.CDEK_API_URL} · ${productionFileEnv.CDEK_FROM_LOCATION || "(no FROM)"}`,
   );
 }
 
-const child = spawn("npx", ["nest", "start", "--watch"], {
+const env = {
+  ...process.env,
+  ...productionFileEnv,
+  NODE_ENV: "production",
+  CORS_ORIGIN: publicUrl,
+  PUBLIC_WEB_URL: publicUrl,
+  COOKIE_SECURE: "true",
+  COOKIE_SAMESITE: "lax",
+  GOOGLE_CALLBACK_URL: `${publicUrl}/api/auth/google/callback`,
+  NGROK_DOMAIN: domain,
+  NGROK_PUBLIC_URL: publicUrl,
+};
+
+function run(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: apiRoot,
+      shell: true,
+      stdio: "inherit",
+      env,
+    });
+    child.on("exit", (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} exited ${code ?? signal}`));
+    });
+  });
+}
+
+try {
+  await run("npx", ["nest", "build"]);
+} catch (err) {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+}
+
+const child = spawn("node", ["dist/src/main.js"], {
   cwd: apiRoot,
   shell: true,
   stdio: "inherit",
-  env: {
-    ...process.env,
-    ...developmentFileEnv,
-    NODE_ENV: "development",
-    CORS_ORIGIN: publicUrl,
-    PUBLIC_WEB_URL: publicUrl,
-    COOKIE_SECURE: "true",
-    COOKIE_SAMESITE: "lax",
-    GOOGLE_CALLBACK_URL: `${publicUrl}/api/auth/google/callback`,
-    NGROK_DOMAIN: domain,
-    NGROK_PUBLIC_URL: publicUrl,
-  },
+  env,
 });
 
 child.on("exit", (code, signal) => {

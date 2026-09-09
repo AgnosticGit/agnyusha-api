@@ -32,6 +32,14 @@ export class OrdersController {
     return this.orders.listForUser(req.user!.id, query);
   }
 
+  /** Pull Ozon status for unpaid NEW orders (TTL + max 3). Non-blocking for list. */
+  @Post('reconcile-payments')
+  @HttpCode(200)
+  @UseGuards(AuthGuard)
+  reconcilePayments(@Req() req: AuthedRequest) {
+    return this.orders.reconcilePaymentsForUser(req.user!.id);
+  }
+
   @Post(':id/pay')
   @HttpCode(200)
   @UseGuards(AuthGuard)

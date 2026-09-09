@@ -19,6 +19,8 @@ import { resolvePublicWebUrl } from '../common/web-origin';
 import { formatPersonName, normalizeEmail } from '../common/person-name';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
+import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
+import { orderStatusAfterCarrierGone } from './order-status.util';
 
 const DELIVERY_SYNC_TTL_MS = 3 * 60 * 1000;
 
@@ -453,6 +455,34 @@ export class OrdersService {
     };
   }
 
+  /**
+   * After list is shown: sync a few unpaid NEW orders with Ozon (TTL-limited).
+   * Returns only orders that changed to paid (for UI merge).
+   */
+  async reconcilePaymentsForUser(userId: string) {
+    const paidIds = await this.payments.reconcileUnpaidOrdersForUser(userId);
+    if (paidIds.length === 0) {
+      return { items: [] as Array<ReturnType<OrdersService['map']>> };
+    }
+
+    const orders = await this.prisma.order.findMany({
+      where: { userId, id: { in: paidIds } },
+      include: {
+        items: {
+          include: {
+            product: { select: { slug: true, isActive: true } },
+          },
+        },
+      },
+    });
+
+    const items: Array<ReturnType<OrdersService['map']>> = [];
+    for (const order of orders) {
+      items.push(this.map(await this.syncDeliveryTracking(order)));
+    }
+    return { items };
+  }
+
   async getForUser(userId: string, orderId: string) {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, userId },
@@ -554,6 +584,7 @@ export class OrdersService {
       SHIPPED: 0,
       DONE: 0,
       CANCELLED: 0,
+      ARCHIVED: 0,
     };
     for (const row of statusGroups) {
       const all =
@@ -659,6 +690,7 @@ export class OrdersService {
   async syncDeliveryTracking<
     T extends {
       id: string;
+      status: OrderStatus;
       deliveryCode: string;
       externalDeliveryId: string | null;
       deliveryTrackNumber: string | null;
@@ -676,8 +708,9 @@ export class OrdersService {
       return order;
     }
     if (
-      order.deliveryStatusCode &&
-      FINAL_DELIVERY_STATUS_CODES.has(order.deliveryStatusCode)
+      order.status === OrderStatus.ARCHIVED ||
+      (order.deliveryStatusCode &&
+        FINAL_DELIVERY_STATUS_CODES.has(order.deliveryStatusCode))
     ) {
       return order;
     }
@@ -721,6 +754,9 @@ export class OrdersService {
       });
       return { ...order, ...updated };
     } catch (err) {
+      if (err instanceof CdekEntityNotFoundError) {
+        return this.markCarrierShipmentGone(order, 'СДЭК');
+      }
       this.logger.warn(
         `Delivery tracking sync failed for order ${order.id}: ${
           err instanceof Error ? err.message : String(err)
@@ -728,6 +764,38 @@ export class OrdersService {
       );
       return order;
     }
+  }
+
+  /**
+   * Carrier no longer has the shipment (manual delete in ЛК or purged).
+   * Stop polling; move to ARCHIVED unless already DONE/CANCELLED/ARCHIVED.
+   */
+  private async markCarrierShipmentGone<
+    T extends {
+      id: string;
+      status: OrderStatus;
+      deliveryTrackNumber: string | null;
+      deliveryStatusCode: string | null;
+      deliveryStatusLabel: string | null;
+      deliveryTrackingUrl: string | null;
+      deliveryStatusAt: Date | null;
+    },
+  >(order: T, carrierLabel: string): Promise<T> {
+    const nextStatus = orderStatusAfterCarrierGone(order.status);
+    const updated = await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: nextStatus,
+        deliveryStatusCode: 'REMOVED',
+        deliveryStatusLabel: `Отправление недоступно в ${carrierLabel}`,
+        deliveryStatusAt: new Date(),
+      },
+    });
+    this.logger.log(
+      `Order ${order.id}: carrier shipment gone (${carrierLabel}) → ` +
+        `delivery=REMOVED status=${nextStatus}`,
+    );
+    return { ...order, ...updated };
   }
 
   private mapAdmin(

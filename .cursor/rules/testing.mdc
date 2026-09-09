@@ -12,3 +12,4 @@ alwaysApply: true
 - Before finishing work that includes tests:
   - Run unit tests with `npm run test:unit`.
   - Run the full integration suite with `npm run test:integration` — not only the newly added tests.
+- **Never run tests against production** (`npm run prod`, `npm run prod:ngrok`, `NODE_ENV=production`, live/prod DB or hosts). Run tests only with local/dev or dedicated test setup.

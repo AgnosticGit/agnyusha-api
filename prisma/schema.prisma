@@ -49,6 +49,8 @@ enum OrderStatus {
   SHIPPED
   DONE
   CANCELLED
+  /// Carrier shipment gone (CDEK 404 / purged) — stop tracking, not a success/cancel.
+  ARCHIVED
 }
 
 model DeliveryMethod {

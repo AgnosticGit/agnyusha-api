@@ -11,6 +11,7 @@ import {
   sanitizeSearchName,
 } from '../common/http-utils';
 import { CDEK_FETCH, type CdekFetch } from './cdek.tokens';
+import { CdekEntityNotFoundError } from './cdek.errors';
 
 type TokenCache = {
   accessToken: string;
@@ -207,6 +208,15 @@ export class CdekService {
       this.logger.error(
         `CDEK ${path} failed with status ${res.status}${detail ? `: ${detail}` : ''}`,
       );
+      if (
+        (res.status === 404 || detail.includes('v2_entity_not_found')) &&
+        path.startsWith('/orders/')
+      ) {
+        const uuidMatch = path.match(/\/orders\/([^/?#]+)/);
+        throw new CdekEntityNotFoundError(
+          uuidMatch?.[1] ? decodeURIComponent(uuidMatch[1]) : path,
+        );
+      }
       throw new ServiceUnavailableException(
         'Служба доставки временно недоступна',
       );
@@ -344,6 +354,12 @@ export class CdekService {
       rawNumber == null || rawNumber === ''
         ? null
         : String(rawNumber).trim() || null;
+
+    this.logger.log(
+      `CDEK order created uuid=${uuid}` +
+        (cdekNumber ? ` cdek_number=${cdekNumber}` : '') +
+        ` api=${this.baseUrl} shipment_point=${this.fromLocation} delivery_point=${deliveryPoint}`,
+    );
 
     return { uuid, cdekNumber };
   }

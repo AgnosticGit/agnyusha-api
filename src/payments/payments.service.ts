@@ -18,6 +18,7 @@ import { formatPersonName } from '../common/person-name';
 import { resolvePublicWebUrl } from '../common/web-origin';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
+import { parseOzonNotification } from './ozon-notification.util';
 
 function cdekTrackingUrl(trackNumber: string) {
   return `https://www.cdek.ru/ru/tracking?order_id=${encodeURIComponent(trackNumber)}`;
@@ -39,6 +40,10 @@ export type OzonCreatePaymentResult = {
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
   private readonly confirmLimiter = new SlidingWindowRateLimiter(20, 60_000);
+  /** Last Ozon reconcile attempt per order id (in-memory TTL). */
+  private readonly paymentReconcileAt = new Map<string, number>();
+  private static readonly RECONCILE_TTL_MS = 45_000;
+  private static readonly RECONCILE_MAX_PER_CALL = 3;
 
   constructor(
     private readonly config: ConfigService,
@@ -203,7 +208,15 @@ export class PaymentsService {
     if (!order) throw new NotFoundException('Заказ не найден');
 
     if (order.paidAt || order.status === OrderStatus.PAID) {
-      return { status: order.status, paid: true };
+      // Retry shipment create if pay succeeded but CDEK/Yandex failed earlier.
+      if (!order.externalDeliveryId) {
+        await this.markOrderPaid(id, order.paymentExternalId);
+      }
+      const updated = await this.prisma.order.findUnique({ where: { id } });
+      return {
+        status: updated?.status ?? order.status,
+        paid: true,
+      };
     }
 
     if (!this.isConfigured()) {
@@ -277,46 +290,143 @@ export class PaymentsService {
     return details.payLink;
   }
 
+  /**
+   * Best-effort sync for unpaid NEW orders (missed webhook / AUTHORIZED race).
+   * Only checks orders past TTL, at most RECONCILE_MAX_PER_CALL per call.
+   * Returns ids that transitioned to paid.
+   */
+  async reconcileUnpaidOrdersForUser(
+    userId: string,
+    orderIds?: string[],
+  ): Promise<string[]> {
+    if (!this.isConfigured()) return [];
+
+    const candidates = await this.prisma.order.findMany({
+      where: {
+        userId,
+        status: OrderStatus.NEW,
+        paidAt: null,
+        OR: [
+          { paymentExternalId: { not: null } },
+          { paymentPayLink: { not: null } },
+        ],
+        ...(orderIds?.length ? { id: { in: orderIds } } : {}),
+      },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    const now = Date.now();
+    const due = candidates
+      .filter((order) => {
+        const last = this.paymentReconcileAt.get(order.id) ?? 0;
+        return now - last >= PaymentsService.RECONCILE_TTL_MS;
+      })
+      .slice(0, PaymentsService.RECONCILE_MAX_PER_CALL);
+
+    if (due.length === 0) return [];
+
+    const paidIds: string[] = [];
+    await Promise.all(
+      due.map(async (order) => {
+        this.paymentReconcileAt.set(order.id, now);
+        try {
+          const details = await this.fetchOzonOrderDetails(order.id);
+          if (!details) return;
+          if (!this.isPaidStatus(details.status)) {
+            this.logger.log(
+              `Ozon reconcile order=${order.id} still status=${details.status}`,
+            );
+            return;
+          }
+          await this.markOrderPaid(order.id, details.id);
+          paidIds.push(order.id);
+        } catch (err) {
+          this.logger.warn(
+            `Ozon reconcile failed for ${order.id}: ${
+              err instanceof Error ? err.message : 'unknown'
+            }`,
+          );
+        }
+      }),
+    );
+
+    return paidIds;
+  }
+
   async handleOzonNotification(
     body: unknown,
     headers: Record<string, string | string[] | undefined>,
   ): Promise<{ ok: true }> {
-    const payload =
-      body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
-
-    const nested =
-      payload.order && typeof payload.order === 'object'
-        ? (payload.order as Record<string, unknown>)
-        : payload.item && typeof payload.item === 'object'
-          ? (payload.item as Record<string, unknown>)
-          : payload;
-
-    const extId =
-      this.asString(nested.extId) ??
-      this.asString(payload.extId) ??
-      this.asString(payload.orderId);
-    const status =
-      this.asString(nested.status) ??
-      this.asString(payload.status) ??
-      this.asString(payload.orderStatus);
-    const ozonId =
-      this.asString(nested.id) ?? this.asString(payload.id) ?? null;
+    const parsed = parseOzonNotification(body);
+    let extId = parsed.extId;
+    let ozonId = parsed.ozonId;
+    const status = parsed.status;
 
     this.logger.log(
       `Ozon Pay notification${extId ? ` order=${extId}` : ''}${
-        status ? ` status=${status}` : ''
-      } headers=${Object.keys(headers)
+        ozonId ? ` ozonId=${ozonId}` : ''
+      }${status ? ` status=${status}` : ''} keys=${parsed.keys.join(',') || '-'} headers=${Object.keys(
+        headers,
+      )
         .map((k) => k.toLowerCase())
         .sort()
         .join(',')}`,
     );
 
-    this.assertNotificationAuth(headers, body);
+    const auth = this.resolveNotificationAuth(headers, body);
+    if (auth === 'mismatch') {
+      this.logger.warn(
+        `Ozon webhook auth failed; header keys=${Object.keys(headers)
+          .map((k) => k.toLowerCase())
+          .sort()
+          .join(',')}`,
+      );
+      throw new UnauthorizedException('Неверная подпись уведомления');
+    }
 
-    if (extId && status && this.isPaidStatus(status)) {
+    // Secret configured but Ozon sent no auth material → must be able to
+    // verify via API access key (even if we cannot resolve the order yet).
+    if (auth === 'absent' && !this.accessKey()) {
+      this.logger.warn(
+        'Ozon webhook has no auth material and OZON_PAY_ACCESS_KEY is empty',
+      );
+      throw new UnauthorizedException('Неверная подпись уведомления');
+    }
+
+    const resolved = await this.resolveOrderIdFromNotification(extId, ozonId);
+    if (!resolved) {
+      this.logger.warn(
+        `Ozon webhook could not resolve local order (extId=${extId ?? '-'} ozonId=${ozonId ?? '-'} keys=${parsed.keys.join(',') || '-'})`,
+      );
+      return { ok: true };
+    }
+    extId = resolved.orderId;
+    ozonId = resolved.ozonId;
+
+    // Ozon often sends webhooks without a notification secret header (only
+    // x-o3-trace). Prefer explicit paid status from the payload; otherwise
+    // confirm via getOrderDetails (covers AUTHORIZED → PAID lag).
+    if (auth === 'absent') {
+      if (status && this.isPaidStatus(status)) {
+        await this.markOrderPaid(extId, ozonId);
+        return { ok: true };
+      }
+      const details = await this.fetchOzonOrderDetails(extId);
+      if (details && this.isPaidStatus(details.status)) {
+        await this.markOrderPaid(extId, details.id ?? ozonId);
+      } else {
+        this.logger.warn(
+          `Ozon webhook for ${extId}: no signature; API status=${details?.status ?? 'unknown'} webhookStatus=${status ?? 'unknown'}`,
+        );
+      }
+      return { ok: true };
+    }
+
+    if (status && this.isPaidStatus(status)) {
       await this.markOrderPaid(extId, ozonId);
-    } else if (extId && (!status || !this.isPaidStatus(status))) {
-      // Webhook may omit status — verify with Ozon API.
+    } else {
       const details = await this.fetchOzonOrderDetails(extId);
       if (details && this.isPaidStatus(details.status)) {
         await this.markOrderPaid(extId, details.id ?? ozonId);
@@ -324,6 +434,41 @@ export class PaymentsService {
     }
 
     return { ok: true };
+  }
+
+  /** Resolve our order id from webhook extId and/or stored Ozon payment id. */
+  private async resolveOrderIdFromNotification(
+    extId: string | null,
+    ozonId: string | null,
+  ): Promise<{ orderId: string; ozonId: string | null } | null> {
+    if (extId) {
+      const byExt = await this.prisma.order.findUnique({
+        where: { id: extId },
+        select: { id: true, paymentExternalId: true },
+      });
+      if (byExt) {
+        return {
+          orderId: byExt.id,
+          ozonId: ozonId ?? byExt.paymentExternalId,
+        };
+      }
+    }
+
+    if (ozonId) {
+      const byPay = await this.prisma.order.findFirst({
+        where: { paymentExternalId: ozonId },
+        select: { id: true, paymentExternalId: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (byPay) {
+        return {
+          orderId: byPay.id,
+          ozonId: byPay.paymentExternalId ?? ozonId,
+        };
+      }
+    }
+
+    return null;
   }
 
   private isPaidStatus(status: string) {
@@ -391,7 +536,9 @@ export class PaymentsService {
       this.logger.warn(`Ozon paid notification for unknown order ${extId}`);
       return;
     }
-    if (order.paidAt) {
+
+    const alreadyPaid = Boolean(order.paidAt);
+    if (alreadyPaid && order.externalDeliveryId) {
       return;
     }
 
@@ -423,6 +570,9 @@ export class PaymentsService {
         });
         externalDeliveryId = yandexOrder.requestId;
         deliveryTrackNumber = deliveryTrackNumber || yandexOrder.requestId;
+        this.logger.log(
+          `Yandex shipment after pay for ${order.id}: requestId=${externalDeliveryId}`,
+        );
       } catch (err) {
         this.logger.error(
           `Yandex create after pay failed for ${order.id}: ${
@@ -459,6 +609,10 @@ export class PaymentsService {
         deliveryTrackingUrl = cdekOrder.cdekNumber
           ? cdekTrackingUrl(cdekOrder.cdekNumber)
           : deliveryTrackingUrl;
+        this.logger.log(
+          `CDEK shipment after pay for ${order.id}: uuid=${externalDeliveryId}` +
+            (cdekOrder.cdekNumber ? ` track=${cdekOrder.cdekNumber}` : ''),
+        );
       } catch (err) {
         this.logger.error(
           `CDEK create after pay failed for ${order.id}: ${
@@ -466,6 +620,15 @@ export class PaymentsService {
           }`,
         );
       }
+    }
+
+    const deliveryChanged =
+      externalDeliveryId !== order.externalDeliveryId ||
+      deliveryTrackNumber !== order.deliveryTrackNumber ||
+      deliveryTrackingUrl !== order.deliveryTrackingUrl;
+
+    if (alreadyPaid && !deliveryChanged) {
+      return;
     }
 
     await this.prisma.order.update({
@@ -476,30 +639,45 @@ export class PaymentsService {
           order.status === OrderStatus.NEW || order.status === OrderStatus.PAID
             ? OrderStatus.PAID
             : order.status,
-        paidAt: new Date(),
+        paidAt: order.paidAt ?? new Date(),
         paymentExternalId: ozonId ?? order.paymentExternalId,
         externalDeliveryId,
         deliveryTrackNumber,
         deliveryTrackingUrl,
       },
     });
-    this.logger.log(`Order ${order.id} marked PAID`);
-    await this.notifyOrderPaid(order);
+    if (!alreadyPaid) {
+      this.logger.log(`Order ${order.id} marked PAID`);
+      await this.notifyOrderPaid(order);
+    } else if (deliveryChanged) {
+      this.logger.log(
+        `Order ${order.id} shipment backfilled after pay (externalDeliveryId=${externalDeliveryId})`,
+      );
+    }
   }
 
-  private assertNotificationAuth(
+  /**
+   * Ozon notification auth:
+   * - no secret configured → match (open webhook; tests / local)
+   * - secret matches header/body/HMAC → match
+   * - secret set but Ozon sent no auth material → absent (verify via API)
+   * - secret set and wrong auth material → mismatch
+   */
+  private resolveNotificationAuth(
     headers: Record<string, string | string[] | undefined>,
     body: unknown,
-  ) {
+  ): 'match' | 'absent' | 'mismatch' {
     const secret = (
       this.config.get<string>('OZON_PAY_NOTIFICATION_SECRET') ?? ''
     ).trim();
-    if (!secret) return;
+    if (!secret) return 'match';
 
     const candidates: string[] = [];
     const headerNames = [
       'x-ozon-notification-secret',
       'x-notification-secret',
+      'notification-secret',
+      'x-o3-notification-secret',
       'authorization',
       'access-token',
       'x-access-token',
@@ -516,36 +694,51 @@ export class PaymentsService {
       }
     }
 
-    if (
-      body &&
-      typeof body === 'object' &&
-      'notificationSecret' in body &&
-      typeof (body as { notificationSecret?: unknown }).notificationSecret ===
-        'string'
-    ) {
-      candidates.push(
-        (body as { notificationSecret: string }).notificationSecret.trim(),
-      );
+    const collectSecretFields = (value: unknown, depth = 0) => {
+      if (!value || typeof value !== 'object' || depth > 2) return;
+      const obj = value as Record<string, unknown>;
+      for (const key of [
+        'notificationSecret',
+        'notification_secret',
+        'secret',
+      ]) {
+        const v = obj[key];
+        if (typeof v === 'string' && v.trim()) candidates.push(v.trim());
+      }
+      for (const nestedKey of ['order', 'item', 'data', 'payload']) {
+        if (nestedKey in obj) collectSecretFields(obj[nestedKey], depth + 1);
+      }
+    };
+    collectSecretFields(body);
+
+    if (candidates.some((c) => c === secret)) return 'match';
+
+    const sigHeaderNames = [
+      'x-signature',
+      'x-ozon-signature',
+      'x-o3-signature',
+      'signature',
+    ];
+    let sig: string | undefined;
+    for (const name of sigHeaderNames) {
+      const headerVal = headers[name] ?? headers[name.toLowerCase()];
+      const provided = Array.isArray(headerVal) ? headerVal[0] : headerVal;
+      if (typeof provided === 'string' && provided.trim()) {
+        sig = provided.trim();
+        break;
+      }
     }
-
-    if (candidates.some((c) => c === secret)) return;
-
-    const sigHeader = headers['x-signature'] ?? headers['x-ozon-signature'];
-    const sig = Array.isArray(sigHeader) ? sigHeader[0] : sigHeader;
-    if (typeof sig === 'string' && sig.trim()) {
+    if (sig) {
       const raw = typeof body === 'string' ? body : JSON.stringify(body ?? {});
       const expected = createHmac('sha256', secret).update(raw).digest('hex');
-      const a = Buffer.from(sig.trim().replace(/^sha256=/i, ''));
+      const normalized = sig.replace(/^sha256=/i, '');
+      const a = Buffer.from(normalized);
       const b = Buffer.from(expected);
-      if (a.length === b.length && timingSafeEqual(a, b)) return;
+      if (a.length === b.length && timingSafeEqual(a, b)) return 'match';
+      return 'mismatch';
     }
 
-    this.logger.warn(
-      `Ozon webhook auth failed; header keys=${Object.keys(headers)
-        .map((k) => k.toLowerCase())
-        .sort()
-        .join(',')}`,
-    );
-    throw new UnauthorizedException('Неверная подпись уведомления');
+    if (candidates.length > 0) return 'mismatch';
+    return 'absent';
   }
 }

@@ -1,3 +1,4 @@
+import './load-env.bootstrap';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -38,9 +39,13 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   const port = config.get<number>('PORT') ?? 3001;
+  const cdekUrl =
+    config.get<string>('CDEK_API_URL')?.replace(/\/$/, '') || '(unset)';
+  const cdekFrom = config.get<string>('CDEK_FROM_LOCATION')?.trim() || '(unset)';
   await app.listen(port);
   console.log(
     `API listening on http://localhost:${port} [${config.get('NODE_ENV')}]`,
   );
+  console.log(`CDEK contour: ${cdekUrl} · shipment_point=${cdekFrom}`);
 }
 void bootstrap();

@@ -347,4 +347,255 @@ describe('Delivery tracking poll (e2e)', () => {
       await app.close();
     }
   });
+
+  it('retries CDEK shipment when order is already paid but has no externalDeliveryId', async () => {
+    let createCalls = 0;
+    const mock = createMockCdekFetch(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method || 'GET').toUpperCase();
+
+      if (url.includes('/v2/oauth/token') && method === 'POST') {
+        return jsonResponse({
+          access_token: 'mock-access-token',
+          token_type: 'bearer',
+          expires_in: 3600,
+        });
+      }
+
+      if (url.includes('/v2/orders') && method === 'POST') {
+        createCalls += 1;
+        return jsonResponse({
+          entity: { uuid: 'cdek-retry-pay', cdek_number: '112233' },
+        });
+      }
+
+      return jsonResponse({ message: `unexpected ${method} ${url}` }, 500);
+    });
+
+    process.env.OZON_PAY_ACCESS_KEY = 'test-access-key';
+    process.env.OZON_PAY_NOTIFICATION_SECRET = '';
+
+    const { app } = await createTestApp({
+      cdekFetch: mock.fetchMock,
+      cdek: 'present',
+      yandex: 'missing',
+      ozon: 'present',
+    });
+    const prisma = app.get(PrismaService);
+
+    try {
+      await ensureDeliveryMethods(app);
+      const { user } = await seedUserSession(prisma, 'cdek-retry@example.com');
+
+      const order = await prisma.order.create({
+        data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          userId: user.id,
+          phone: '+79001112233',
+          contactChannel: 'Telegram',
+          cityLabel: 'Москва',
+          deliveryCode: DeliveryMethodCode.CDEK,
+          deliveryTitle: 'СДЭК',
+          pickupLabel: 'ПВЗ',
+          pickupCode: 'MSK99',
+          status: OrderStatus.PAID,
+          paidAt: new Date(),
+          total: 500,
+          paymentExternalId: 'ozon-cdek-retry',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      await request(app.getHttpServer())
+        .post('/api/payments/ozon/confirm')
+        .send({ orderId: order.id })
+        .expect(200);
+
+      expect(createCalls).toBe(1);
+      const updated = await prisma.order.findUnique({
+        where: { id: order.id },
+      });
+      expect(updated?.externalDeliveryId).toBe('cdek-retry-pay');
+      expect(updated?.deliveryTrackNumber).toBe('112233');
+
+      await prisma.order.delete({ where: { id: order.id } });
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('archives order when CDEK returns 404 entity not found', async () => {
+    let getOrderCalls = 0;
+    const mock = createMockCdekFetch(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method || 'GET').toUpperCase();
+
+      if (url.includes('/v2/oauth/token') && method === 'POST') {
+        return jsonResponse({
+          access_token: 'mock-access-token',
+          token_type: 'bearer',
+          expires_in: 3600,
+        });
+      }
+
+      if (url.includes('/v2/orders/gone-uuid') && method === 'GET') {
+        getOrderCalls += 1;
+        return jsonResponse(
+          {
+            requests: [
+              {
+                type: 'GET',
+                state: 'INVALID',
+                errors: [
+                  {
+                    code: 'v2_entity_not_found',
+                    message: 'Entity is not found by uuid gone-uuid',
+                  },
+                ],
+              },
+            ],
+          },
+          404,
+        );
+      }
+
+      return jsonResponse({ message: `unexpected ${method} ${url}` }, 500);
+    });
+
+    const { app } = await createTestApp({
+      cdekFetch: mock.fetchMock,
+      cdek: 'present',
+      yandex: 'missing',
+    });
+    const prisma = app.get(PrismaService);
+
+    try {
+      const { user, raw } = await seedUserSession(
+        prisma,
+        'cdek-gone@example.com',
+      );
+
+      const order = await prisma.order.create({
+        data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          userId: user.id,
+          phone: '+79001112233',
+          contactChannel: 'Telegram',
+          cityLabel: 'Москва',
+          deliveryCode: DeliveryMethodCode.CDEK,
+          deliveryTitle: 'СДЭК',
+          pickupLabel: 'ПВЗ',
+          pickupCode: 'MSK99',
+          status: OrderStatus.PAID,
+          paidAt: new Date(),
+          total: 500,
+          externalDeliveryId: 'gone-uuid',
+          deliveryTrackNumber: '110011',
+          deliveryTrackingUrl:
+            'https://www.cdek.ru/ru/tracking?order_id=110011',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const listed = await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+
+      const row = listed.body.items.find(
+        (o: { id: string }) => o.id === order.id,
+      );
+      expect(row.status).toBe('ARCHIVED');
+      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(row.deliveryTracking.statusLabel).toContain('СДЭК');
+      expect(getOrderCalls).toBe(1);
+
+      await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+      expect(getOrderCalls).toBe(1);
+
+      const keptDone = await prisma.order.create({
+        data: {
+          email: 'buyer2@example.com',
+          lastName: 'Петров',
+          firstName: 'Пётр',
+          userId: user.id,
+          phone: '+79001112234',
+          contactChannel: 'Telegram',
+          cityLabel: 'Москва',
+          deliveryCode: DeliveryMethodCode.CDEK,
+          deliveryTitle: 'СДЭК',
+          pickupLabel: 'ПВЗ',
+          pickupCode: 'MSK99',
+          status: OrderStatus.DONE,
+          paidAt: new Date(),
+          total: 500,
+          externalDeliveryId: 'gone-uuid',
+          deliveryTrackNumber: '110012',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const listed2 = await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+      const doneRow = listed2.body.items.find(
+        (o: { id: string }) => o.id === keptDone.id,
+      );
+      expect(doneRow.status).toBe('DONE');
+      expect(doneRow.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(getOrderCalls).toBe(2);
+
+      await prisma.order.delete({ where: { id: order.id } });
+      await prisma.order.delete({ where: { id: keptDone.id } });
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
+    } finally {
+      await app.close();
+    }
+  });
 });
