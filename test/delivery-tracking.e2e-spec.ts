@@ -46,7 +46,7 @@ describe('Delivery tracking poll (e2e)', () => {
           create: [
             {
               sku: `TRK-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              weight: '0,8 кг.',
+              weight: '0,8 кг.', weightGrams: 800,
               price: 500,
               stock: 10,
             },
@@ -110,6 +110,9 @@ describe('Delivery tracking poll (e2e)', () => {
         .post('/api/orders')
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .send({
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
           phone: '+7 (900) 111-22-33',
           contactChannel: 'Telegram',
           cityLabel: 'Москва',
@@ -190,6 +193,9 @@ describe('Delivery tracking poll (e2e)', () => {
 
       const order = await prisma.order.create({
         data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
           userId: user.id,
           phone: '+79001112233',
           contactChannel: 'Telegram',
@@ -207,7 +213,7 @@ describe('Delivery tracking poll (e2e)', () => {
               {
                 productName: 'Корм',
                 image: '/assets/product-turkey.png',
-                weight: '1 кг.',
+                weight: '1 кг.', weightGrams: 1000,
                 price: 500,
                 qty: 1,
               },
@@ -284,6 +290,9 @@ describe('Delivery tracking poll (e2e)', () => {
 
       const order = await prisma.order.create({
         data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
           userId: user.id,
           phone: '+79001112233',
           contactChannel: 'Telegram',
@@ -300,7 +309,7 @@ describe('Delivery tracking poll (e2e)', () => {
               {
                 productName: 'Корм',
                 image: '/assets/product-turkey.png',
-                weight: '1 кг.',
+                weight: '1 кг.', weightGrams: 1000,
                 price: 500,
                 qty: 1,
               },

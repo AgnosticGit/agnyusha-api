@@ -1,9 +1,11 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsEmail,
   IsInt,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -43,9 +45,27 @@ export class CreateOrderItemDto {
 }
 
 export class CreateOrderDto {
+  @IsEmail({}, { message: 'Укажите корректный email' })
+  email!: string;
+
   @IsString()
   @MinLength(5)
   phone!: string;
+
+  @IsString()
+  @MinLength(1, { message: 'Укажите фамилию' })
+  @MaxLength(80)
+  lastName!: string;
+
+  @IsString()
+  @MinLength(1, { message: 'Укажите имя' })
+  @MaxLength(80)
+  firstName!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  middleName?: string;
 
   @IsString()
   @MinLength(1)

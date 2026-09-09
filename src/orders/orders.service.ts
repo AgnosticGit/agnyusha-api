@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -13,6 +14,13 @@ import { CdekService } from '../cdek/cdek.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import type { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
 import { isInventoryEnabled } from '../common/inventory';
+import { resolveWeightGrams } from '../common/weight';
+import {
+  formatPersonName,
+  normalizeEmail,
+} from '../common/person-name';
+import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
+import { buildOrderReceiptMail } from '../mail/order-receipt';
 
 const DELIVERY_SYNC_TTL_MS = 3 * 60 * 1000;
 
@@ -30,18 +38,6 @@ const FINAL_DELIVERY_STATUS_CODES = new Set([
   'DELIVERY_TRACKING_FINISHED',
 ]);
 
-function estimateWeightGrams(weight: string): number {
-  const normalized = weight.replace(',', '.').toLowerCase();
-  const match = normalized.match(/(\d+(?:\.\d+)?)/);
-  if (!match) return 800;
-  const value = Number(match[1]);
-  if (!Number.isFinite(value) || value <= 0) return 800;
-  if (/г(?!\w)|g\b/.test(normalized) && !/кг|kg/.test(normalized)) {
-    return Math.max(100, Math.round(value));
-  }
-  return Math.max(100, Math.round(value * 1000));
-}
-
 function cdekTrackingUrl(trackNumber: string) {
   return `https://www.cdek.ru/ru/tracking?order_id=${encodeURIComponent(trackNumber)}`;
 }
@@ -52,6 +48,7 @@ type ResolvedLine = {
   productName: string;
   image: string;
   weight: string;
+  weightGrams: number;
   price: number;
   qty: number;
 };
@@ -66,10 +63,55 @@ export class OrdersService {
     private readonly cdek: CdekService,
     private readonly payments: PaymentsService,
     private readonly config: ConfigService,
+    @Inject(MAIL_SEND) private readonly sendMail: MailSend,
   ) {}
 
   private inventoryOn() {
     return isInventoryEnabled(this.config);
+  }
+
+  private webOrigin(): string {
+    const cors = this.config.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
+    return cors.split(',')[0]?.trim() || 'http://localhost:3000';
+  }
+
+  private async notifyOrderReceipt(input: {
+    id: string;
+    email: string;
+    total: number;
+    needsLogin: boolean;
+    paid: boolean;
+    items: Array<{
+      productName: string;
+      weight: string;
+      price: number;
+      qty: number;
+      image: string;
+    }>;
+  }) {
+    const mail = buildOrderReceiptMail({
+      orderId: input.id,
+      total: input.total,
+      items: input.items,
+      webOrigin: this.webOrigin(),
+      needsLogin: input.needsLogin,
+      paid: input.paid,
+    });
+    try {
+      await this.sendMail({
+        to: input.email,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        attachments: mail.attachments,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Order mail failed for ${input.id}: ${
+          err instanceof Error ? err.message : 'unknown'
+        }`,
+      );
+    }
   }
 
   /** Resolve cart lines from DB — never trust client price/name/image. */
@@ -105,6 +147,7 @@ export class OrdersService {
         productName: variant.product.name,
         image: variant.product.image,
         weight: variant.weight,
+        weightGrams: resolveWeightGrams(variant.weightGrams, variant.weight),
         price: variant.price,
         qty: item.qty,
       });
@@ -113,12 +156,78 @@ export class OrdersService {
     return resolved;
   }
 
-  async create(userId: string | null, dto: CreateOrderDto) {
+  async create(sessionUserId: string | null, dto: CreateOrderDto) {
     const deliveryCode = dto.deliveryCode.trim().toUpperCase();
     const pickupCode = dto.pickupCode?.trim() || null;
     const payEnabled = this.payments.isConfigured();
     let externalDeliveryId: string | null = null;
 
+    const lastName = dto.lastName.trim();
+    const firstName = dto.firstName.trim();
+    const middleName = (dto.middleName ?? '').trim();
+    const phone = dto.phone.trim();
+    if (!lastName || !firstName) {
+      throw new BadRequestException('Укажите фамилию и имя');
+    }
+    if (phone.replace(/\D/g, '').length < 11) {
+      throw new BadRequestException('Укажите корректный телефон');
+    }
+
+    const sessionUser = sessionUserId
+      ? await this.prisma.user.findUnique({ where: { id: sessionUserId } })
+      : null;
+    if (sessionUserId && !sessionUser) {
+      throw new BadRequestException('Сессия недействительна — войдите снова');
+    }
+
+    const email = sessionUser
+      ? sessionUser.email
+      : normalizeEmail(dto.email);
+    if (!email || !email.includes('@')) {
+      throw new BadRequestException('Укажите корректный email');
+    }
+
+    const recipientName = formatPersonName({
+      lastName,
+      firstName,
+      middleName,
+    });
+
+    const owner = sessionUser
+      ? sessionUser
+      : await (async () => {
+          const existing = await this.prisma.user.findUnique({
+            where: { email },
+          });
+          if (existing) {
+            if (!existing.emailVerifiedAt) {
+              return this.prisma.user.update({
+                where: { id: existing.id },
+                data: { phone, lastName, firstName, middleName },
+              });
+            }
+            return existing;
+          }
+          return this.prisma.user.create({
+            data: {
+              email,
+              phone,
+              lastName,
+              firstName,
+              middleName,
+            },
+          });
+        })();
+
+    // Logged-in user: keep profile in sync with checkout.
+    if (sessionUser) {
+      await this.prisma.user.update({
+        where: { id: sessionUser.id },
+        data: { phone, lastName, firstName, middleName },
+      });
+    }
+
+    const userId = owner.id;
     const resolvedItems = await this.resolveItems(dto.items);
     const total = resolvedItems.reduce((s, i) => s + i.price * i.qty, 0);
 
@@ -141,15 +250,15 @@ export class OrdersService {
         const yandexOrder = await this.yandex.createPickupOrder({
           requestId: operatorRequestId,
           pickupPointId: pickupCode,
-          phone: dto.phone,
-          recipientName: 'Покупатель',
+          phone,
+          recipientName,
           comment: `Заказ Агнюша · ${dto.cityLabel}`,
           items: resolvedItems.map((item) => ({
             name: item.productName,
             article: item.variantId,
             price: item.price,
             qty: item.qty,
-            weightGrams: estimateWeightGrams(item.weight),
+            weightGrams: item.weightGrams,
           })),
         });
         externalDeliveryId = yandexOrder.requestId;
@@ -179,15 +288,15 @@ export class OrdersService {
       const cdekOrder = await this.cdek.createPickupOrder({
         orderNumber: `agny-${Date.now().toString(36)}`,
         deliveryPointCode: pickupCode,
-        phone: dto.phone,
-        recipientName: 'Покупатель',
+        phone,
+        recipientName,
         comment: `Заказ Агнюша · ${dto.cityLabel}`,
         items: resolvedItems.map((item) => ({
           name: item.productName,
           wareKey: item.variantId,
           price: item.price,
           qty: item.qty,
-          weightGrams: estimateWeightGrams(item.weight),
+          weightGrams: item.weightGrams,
         })),
       });
       externalDeliveryId = cdekOrder.uuid;
@@ -219,7 +328,11 @@ export class OrdersService {
       return tx.order.create({
         data: {
           userId,
-          phone: dto.phone.trim(),
+          email,
+          phone,
+          lastName,
+          firstName,
+          middleName,
           contactChannel: dto.contactChannel.trim(),
           cityLabel: dto.cityLabel.trim(),
           deliveryCode,
@@ -237,6 +350,7 @@ export class OrdersService {
               productName: i.productName,
               image: i.image,
               weight: i.weight,
+              weightGrams: i.weightGrams,
               price: i.price,
               qty: i.qty,
             })),
@@ -253,6 +367,20 @@ export class OrdersService {
     });
 
     if (!payEnabled) {
+      await this.notifyOrderReceipt({
+        id: order.id,
+        email,
+        total,
+        needsLogin: !sessionUser?.emailVerifiedAt,
+        paid: false,
+        items: order.items.map((i) => ({
+          productName: i.productName,
+          weight: i.weight,
+          price: i.price,
+          qty: i.qty,
+          image: i.image,
+        })),
+      });
       return this.map(order);
     }
 
@@ -612,18 +740,23 @@ export class OrdersService {
   private mapAdmin(
     order: Parameters<OrdersService['map']>[0] & {
       user?: { email: string } | null;
+      email?: string;
     },
   ) {
     return {
       ...this.map(order),
-      customerEmail: order.user?.email ?? null,
+      customerEmail: order.email || order.user?.email || null,
     };
   }
 
   private map(order: {
     id: string;
     status: string;
+    email?: string;
     phone: string;
+    lastName?: string;
+    firstName?: string;
+    middleName?: string | null;
     contactChannel: string;
     cityLabel: string;
     deliveryCode: string;
@@ -662,7 +795,11 @@ export class OrdersService {
     return {
       id: order.id,
       status: order.status,
+      email: order.email ?? '',
       phone: order.phone,
+      lastName: order.lastName ?? '',
+      firstName: order.firstName ?? '',
+      middleName: order.middleName ?? '',
       contactChannel: order.contactChannel,
       cityLabel: order.cityLabel,
       deliveryCode: order.deliveryCode,

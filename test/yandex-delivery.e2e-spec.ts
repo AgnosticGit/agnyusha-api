@@ -223,7 +223,7 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
           create: [
             {
               sku: `YANDEX-ORD-${Date.now()}`,
-              weight: '0,8 кг.',
+              weight: '0,8 кг.', weightGrams: 800,
               price: 725,
               stock: 5,
             },
@@ -237,6 +237,9 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
       .post('/api/orders')
       .set('Cookie', `${SESSION_COOKIE}=${raw}`)
       .send({
+        email: 'buyer@example.com',
+        lastName: 'Иванов',
+        firstName: 'Иван',
         phone: '+7 (900) 123-45-67',
         contactChannel: 'Telegram',
         cityLabel: 'Москва',

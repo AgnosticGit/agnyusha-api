@@ -46,6 +46,16 @@ export class ResendMailService {
       subject: input.subject,
       html: input.html,
       text: input.text,
+      ...(input.attachments?.length
+        ? {
+            attachments: input.attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content,
+              contentId: a.contentId,
+              contentType: a.contentType,
+            })),
+          }
+        : {}),
     });
 
     if (result.error) {

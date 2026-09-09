@@ -1,18 +1,21 @@
 import {
+  Body,
   Controller,
   Get,
+  Patch,
   Post,
-  Body,
   Req,
   Res,
   HttpCode,
   ServiceUnavailableException,
   Logger,
+  UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService, GoogleOAuthError } from './auth.service';
-import { RequestMagicLinkDto, VerifyMagicLinkDto } from './dto/auth.dto';
+import { RequestMagicLinkDto, UpdateProfileDto, VerifyMagicLinkDto } from './dto/auth.dto';
 import {
   CART_COOKIE,
   OAUTH_STATE_COOKIE,
@@ -24,6 +27,7 @@ import {
   sessionCookieOptions,
 } from './auth.crypto';
 import { CartService } from '../cart/cart.service';
+import { AuthGuard, type AuthedRequest } from './auth.guard';
 
 /** Avoid Express query parser turning `+` into space (breaks Google auth codes). */
 function rawQueryParam(req: Request, name: string): string | undefined {
@@ -107,6 +111,19 @@ export class AuthController {
     const user = await this.auth.getUserBySessionToken(
       req.cookies?.[SESSION_COOKIE],
     );
+    return { user };
+  }
+
+  @Patch('profile')
+  @UseGuards(AuthGuard)
+  async updateProfile(
+    @Req() req: AuthedRequest,
+    @Body() body: UpdateProfileDto,
+  ) {
+    if (!req.user?.id) {
+      throw new UnauthorizedException();
+    }
+    const user = await this.auth.updateProfile(req.user.id, body);
     return { user };
   }
 

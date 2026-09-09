@@ -29,6 +29,7 @@ export class ProductsService {
       id: v.id,
       sku: v.sku,
       weight: v.weight,
+      weightGrams: v.weightGrams,
       price: v.price,
       stock: v.stock,
       sortOrder: v.sortOrder,
@@ -65,6 +66,7 @@ export class ProductsService {
       fromPrice: minPrice(variants),
       sortOrder: product.sortOrder,
       isActive: product.isActive,
+      isPopular: product.isPopular,
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
     };
@@ -281,10 +283,12 @@ export class ProductsService {
         nutritionCarbs: dto.nutritionCarbs ?? null,
         sortOrder: dto.sortOrder ?? 0,
         isActive: dto.isActive ?? true,
+        isPopular: dto.isPopular ?? false,
         variants: {
           create: variants.map((v, index) => ({
             sku: v.sku,
             weight: v.weight,
+            weightGrams: v.weightGrams,
             price: v.price,
             stock: v.stock,
             sortOrder: v.sortOrder ?? index,
@@ -331,6 +335,7 @@ export class ProductsService {
             data: {
               sku: v.sku,
               weight: v.weight,
+              weightGrams: v.weightGrams,
               price: v.price,
               stock: v.stock,
               sortOrder: v.sortOrder ?? index,
@@ -342,6 +347,7 @@ export class ProductsService {
               productId: id,
               sku: v.sku,
               weight: v.weight,
+              weightGrams: v.weightGrams,
               price: v.price,
               stock: v.stock,
               sortOrder: v.sortOrder ?? index,
@@ -371,6 +377,7 @@ export class ProductsService {
           nutritionCarbs: dto.nutritionCarbs ?? null,
           sortOrder: dto.sortOrder ?? 0,
           isActive: dto.isActive ?? true,
+          isPopular: dto.isPopular ?? false,
         },
         include: this.includeVariants,
       });

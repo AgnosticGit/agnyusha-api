@@ -88,8 +88,8 @@ describe('Cart guest persist & merge (e2e)', () => {
         name: 'Cart Active Feed',
         category: 'DOGS',
         variants: [
-          { sku: 'CART-ACTIVE-01', weight: '1 кг.', price: 500, stock: 10 },
-          { sku: 'CART-LOW-01', weight: '2 кг.', price: 900, stock: 3 },
+          { sku: 'CART-ACTIVE-01', weight: '1 кг.', weightGrams: 1000, price: 500, stock: 10 },
+          { sku: 'CART-LOW-01', weight: '2 кг.', weightGrams: 2000, price: 900, stock: 3 },
         ],
         ingredients: 't',
         description: 't',
@@ -107,7 +107,7 @@ describe('Cart guest persist & merge (e2e)', () => {
         name: 'Cart Inactive Feed',
         category: 'CATS',
         variants: [
-          { sku: 'CART-INACTIVE-01', weight: '0,5 кг.', price: 400, stock: 8 },
+          { sku: 'CART-INACTIVE-01', weight: '0,5 кг.', weightGrams: 500, price: 400, stock: 8 },
         ],
         ingredients: 't',
         description: 't',
@@ -318,7 +318,7 @@ describe('Cart guest persist & merge (e2e)', () => {
       data: {
         productId,
         sku: `CART-OOS-${Date.now()}`,
-        weight: '3 кг.',
+        weight: '3 кг.', weightGrams: 3000,
         price: 100,
         stock: 5,
       },

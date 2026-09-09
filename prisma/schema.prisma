@@ -64,16 +64,22 @@ model DeliveryMethod {
 }
 
 model User {
-  id          String           @id @default(cuid())
-  email       String           @unique
-  role        UserRole         @default(USER)
-  bannedAt    DateTime?        @map("banned_at")
-  createdAt   DateTime         @default(now()) @map("created_at")
-  magicLinks  MagicLink[]
-  sessions    Session[]
-  orders      Order[]
-  permissions UserPermission[]
-  cart        Cart?
+  id              String           @id @default(cuid())
+  email           String           @unique
+  /// Set when the user completes magic-link or Google login.
+  emailVerifiedAt DateTime?        @map("email_verified_at")
+  phone           String           @default("")
+  lastName        String           @default("") @map("last_name")
+  firstName       String           @default("") @map("first_name")
+  middleName      String           @default("") @map("middle_name")
+  role            UserRole         @default(USER)
+  bannedAt        DateTime?        @map("banned_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  magicLinks      MagicLink[]
+  sessions        Session[]
+  orders          Order[]
+  permissions     UserPermission[]
+  cart            Cart?
 
   @@map("users")
 }
@@ -132,26 +138,31 @@ model Product {
   nutritionCarbs   Float?           @map("nutrition_carbs")
   sortOrder        Int              @default(0) @map("sort_order")
   isActive         Boolean          @default(true) @map("is_active")
+  /// Curated homepage “Популярные товары” — only via admin checkbox.
+  isPopular        Boolean          @default(false) @map("is_popular")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
   variants         ProductVariant[]
   orderItems       OrderItem[]
 
   @@index([category, isActive, sortOrder])
+  @@index([isPopular, isActive, sortOrder])
   @@map("products")
 }
 
 model ProductVariant {
-  id        String   @id @default(cuid())
-  productId String   @map("product_id")
-  sku       String   @unique
-  weight    String
-  price     Float
-  stock     Int      @default(0)
-  sortOrder Int      @default(0) @map("sort_order")
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  orderItems OrderItem[]
-  cartItems  CartItem[]
+  id          String   @id @default(cuid())
+  productId   String   @map("product_id")
+  sku         String   @unique
+  weight      String
+  /// Real package weight for shipping (grams).
+  weightGrams Int      @map("weight_grams")
+  price       Float
+  stock       Int      @default(0)
+  sortOrder   Int      @default(0) @map("sort_order")
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+  cartItems   CartItem[]
 
   @@index([productId, sortOrder])
   @@map("product_variants")
@@ -188,7 +199,11 @@ model Order {
   id                   String      @id @default(cuid())
   userId               String?     @map("user_id")
   status               OrderStatus @default(NEW)
+  email                String
   phone                String
+  lastName             String      @map("last_name")
+  firstName            String      @map("first_name")
+  middleName           String      @default("") @map("middle_name")
   contactChannel       String      @map("contact_channel")
   cityLabel            String      @map("city_label")
   deliveryCode         String      @map("delivery_code")
@@ -211,6 +226,7 @@ model Order {
 
   @@index([userId, createdAt])
   @@index([createdAt])
+  @@index([email])
   @@map("orders")
 }
 
@@ -222,6 +238,8 @@ model OrderItem {
   productName String          @map("product_name")
   image       String
   weight      String
+  /// Snapshot of variant shipping weight (grams) at order time.
+  weightGrams Int             @map("weight_grams")
   price       Float
   qty         Int
   order       Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)

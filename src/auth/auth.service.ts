@@ -143,11 +143,21 @@ export class AuthService {
   private async toAuthUser(user: {
     id: string;
     email: string;
+    emailVerifiedAt?: Date | null;
+    phone?: string | null;
+    lastName?: string | null;
+    firstName?: string | null;
+    middleName?: string | null;
     role: AuthUser['role'];
   }): Promise<AuthUser> {
     return {
       id: user.id,
       email: user.email,
+      emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
+      phone: user.phone ?? '',
+      lastName: user.lastName ?? '',
+      firstName: user.firstName ?? '',
+      middleName: user.middleName ?? '',
       role: user.role,
       permissions: await this.permissionsForUser(user.id),
     };
@@ -170,18 +180,27 @@ export class AuthService {
     const maxAgeMs = SESSION_DAYS * 24 * 60 * 60 * 1000;
     const sessionToken = createRawToken();
     const expiresAt = new Date(Date.now() + maxAgeMs);
+    const now = new Date();
 
-    await this.prisma.session.create({
-      data: {
-        userId: user.id,
-        tokenHash: hashToken(sessionToken),
-        expiresAt,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.user.updateMany({
+        where: { id: user.id, emailVerifiedAt: null },
+        data: { emailVerifiedAt: now },
+      }),
+      this.prisma.session.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashToken(sessionToken),
+          expiresAt,
+        },
+      }),
+    ]);
 
     return {
       sessionToken,
-      user: await this.toAuthUser(user),
+      user: await this.toAuthUser(
+        await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } }),
+      ),
       maxAgeMs,
     };
   }
@@ -376,8 +395,10 @@ export class AuthService {
 
     const user = await this.prisma.user.upsert({
       where: { email },
-      create: { email },
-      update: {},
+      create: { email, emailVerifiedAt: new Date() },
+      update: {
+        emailVerifiedAt: { set: new Date() },
+      },
     });
 
     return this.createSessionForUser(user);
@@ -407,5 +428,37 @@ export class AuthService {
     await this.prisma.session.deleteMany({
       where: { tokenHash: hashToken(rawToken) },
     });
+  }
+
+  async updateProfile(
+    userId: string,
+    dto: {
+      phone: string;
+      lastName: string;
+      firstName: string;
+      middleName?: string;
+    },
+  ): Promise<AuthUser> {
+    const lastName = dto.lastName.trim();
+    const firstName = dto.firstName.trim();
+    const middleName = (dto.middleName ?? '').trim();
+    const phone = dto.phone.trim();
+    if (!lastName || !firstName) {
+      throw new BadRequestException('Укажите фамилию и имя');
+    }
+    if (phone.replace(/\D/g, '').length < 11) {
+      throw new BadRequestException('Укажите корректный телефон');
+    }
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        lastName,
+        firstName,
+        middleName,
+        phone,
+      },
+    });
+    return this.toAuthUser(user);
   }
 }

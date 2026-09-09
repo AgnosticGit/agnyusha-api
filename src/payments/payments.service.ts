@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -12,6 +13,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { SlidingWindowRateLimiter } from '../common/rate-limit';
+import { resolveWeightGrams } from '../common/weight';
+import { formatPersonName } from '../common/person-name';
+import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
+import { buildOrderReceiptMail } from '../mail/order-receipt';
 
 function cdekTrackingUrl(trackNumber: string) {
   return `https://www.cdek.ru/ru/tracking?order_id=${encodeURIComponent(trackNumber)}`;
@@ -39,6 +44,7 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly yandex: YandexDeliveryService,
     private readonly cdek: CdekService,
+    @Inject(MAIL_SEND) private readonly sendMail: MailSend,
   ) {}
 
   isConfigured(): boolean {
@@ -305,10 +311,51 @@ export class PaymentsService {
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   }
 
+  private async notifyOrderPaid(order: {
+    id: string;
+    email: string;
+    total: number;
+    items: Array<{
+      productName: string;
+      weight: string;
+      price: number;
+      qty: number;
+      image: string;
+    }>;
+    user?: { emailVerifiedAt: Date | null } | null;
+  }) {
+    const mail = buildOrderReceiptMail({
+      orderId: order.id,
+      total: order.total,
+      items: order.items,
+      webOrigin: this.publicWebUrl(),
+      needsLogin: !order.user?.emailVerifiedAt,
+      paid: true,
+    });
+    try {
+      await this.sendMail({
+        to: order.email,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        attachments: mail.attachments,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Paid order mail failed for ${order.id}: ${
+          err instanceof Error ? err.message : 'unknown'
+        }`,
+      );
+    }
+  }
+
   private async markOrderPaid(extId: string, ozonId: string | null) {
     const order = await this.prisma.order.findUnique({
       where: { id: extId },
-      include: { items: true },
+      include: {
+        items: true,
+        user: { select: { emailVerifiedAt: true } },
+      },
     });
     if (!order) {
       this.logger.warn(`Ozon paid notification for unknown order ${extId}`);
@@ -334,14 +381,14 @@ export class PaymentsService {
           requestId: `agny-pay-${order.id.slice(-10)}-${Date.now().toString(36)}`,
           pickupPointId: order.pickupCode,
           phone: order.phone,
-          recipientName: 'Покупатель',
+          recipientName: formatPersonName(order),
           comment: `Заказ Агнюша · ${order.cityLabel}`,
           items: order.items.map((item) => ({
             name: item.productName,
             article: item.variantId ?? item.id,
             price: item.price,
             qty: item.qty,
-            weightGrams: 800,
+            weightGrams: resolveWeightGrams(item.weightGrams, item.weight),
           })),
         });
         externalDeliveryId = yandexOrder.requestId;
@@ -367,14 +414,14 @@ export class PaymentsService {
           orderNumber: `agny-pay-${order.id.slice(-12)}`,
           deliveryPointCode: order.pickupCode,
           phone: order.phone,
-          recipientName: 'Покупатель',
+          recipientName: formatPersonName(order),
           comment: `Заказ Агнюша · ${order.cityLabel}`,
           items: order.items.map((item) => ({
             name: item.productName,
             wareKey: item.variantId ?? item.id,
             price: item.price,
             qty: item.qty,
-            weightGrams: 800,
+            weightGrams: resolveWeightGrams(item.weightGrams, item.weight),
           })),
         });
         externalDeliveryId = cdekOrder.uuid;
@@ -407,6 +454,7 @@ export class PaymentsService {
       },
     });
     this.logger.log(`Order ${order.id} marked PAID`);
+    await this.notifyOrderPaid(order);
   }
 
   private assertNotificationAuth(

@@ -85,12 +85,21 @@ describe('Ozon Pay (e2e)', () => {
 
     process.env.OZON_PAY_ACCESS_KEY = 'test-access-key';
     process.env.OZON_PAY_NOTIFICATION_SECRET = '';
-    process.env.PUBLIC_WEB_URL = 'https://example.test';
 
+    const sent: Array<{
+      to: string;
+      subject: string;
+      html: string;
+      text: string;
+      attachments?: Array<{ contentId?: string }>;
+    }> = [];
     const created = await createTestApp({
       cdek: 'missing',
       yandex: 'missing',
       ozon: 'present',
+      mailSend: async (input) => {
+        sent.push(input);
+      },
     });
     const prisma = created.app.get(PrismaService);
 
@@ -106,7 +115,7 @@ describe('Ozon Pay (e2e)', () => {
             create: [
               {
                 sku: `OZON-${Date.now()}`,
-                weight: '1 кг.',
+                weight: '1 кг.', weightGrams: 1000,
                 price: 1,
                 stock: 5,
               },
@@ -119,6 +128,9 @@ describe('Ozon Pay (e2e)', () => {
       const order = await request(created.app.getHttpServer())
         .post('/api/orders')
         .send({
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
           phone: '+7 (999) 111-22-33',
           contactChannel: 'Telegram',
           cityLabel: 'Санкт-Петербург',
@@ -137,6 +149,7 @@ describe('Ozon Pay (e2e)', () => {
         'https://checkout.ozon.ru/order/ozon-payment-1',
       );
       expect(order.body.paymentExternalId).toBe('ozon-payment-1');
+      expect(sent).toHaveLength(0);
 
       await request(created.app.getHttpServer())
         .post('/api/payments/ozon/webhook')
@@ -154,9 +167,101 @@ describe('Ozon Pay (e2e)', () => {
       });
       expect(paid?.status).toBe('PAID');
       expect(paid?.paidAt).toBeTruthy();
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].to).toBe('buyer@example.com');
+      expect(sent[0].text).toContain('оплачен');
+      expect(sent[0].text).toContain('Ozon Pay feed');
+      expect(sent[0].html).toContain('cid:');
+      expect(sent[0].attachments?.length).toBeGreaterThan(0);
+      expect(sent[0].html).toContain('войдите на сайте');
     } finally {
       global.fetch = originalFetch;
       delete process.env.OZON_PAY_ACCESS_KEY;
+      await created.app.close();
+    }
+  });
+
+  it('paid receipt omits login invite for verified users', async () => {
+    const sent: Array<{
+      to: string;
+      html: string;
+      text: string;
+      attachments?: Array<{ contentId?: string }>;
+    }> = [];
+    const created = await createTestApp({
+      cdek: 'missing',
+      yandex: 'missing',
+      ozon: 'missing',
+      mailSend: async (input) => {
+        sent.push(input);
+      },
+    });
+    const prisma = created.app.get(PrismaService);
+
+    try {
+      await ensureDeliveryMethods(created.app);
+      const user = await prisma.user.upsert({
+        where: { email: 'verified-receipt@example.com' },
+        create: {
+          email: 'verified-receipt@example.com',
+          role: UserRole.USER,
+          emailVerifiedAt: new Date(),
+        },
+        update: { emailVerifiedAt: new Date() },
+      });
+      const raw = createRawToken();
+      await prisma.session.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashToken(raw),
+          expiresAt: new Date(Date.now() + 86400000),
+        },
+      });
+      const product = await prisma.product.create({
+        data: {
+          slug: `receipt-verified-${Date.now()}`,
+          name: 'Verified Beef',
+          image: '/assets/product-beef.png',
+          category: 'DOGS',
+          variants: {
+            create: [
+              {
+                sku: `VER-${Date.now()}`,
+                weight: '0,5 кг.',
+                weightGrams: 500,
+                price: 400,
+                stock: 3,
+              },
+            ],
+          },
+        },
+        include: { variants: true },
+      });
+
+      await request(created.app.getHttpServer())
+        .post('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .send({
+          email: 'verified-receipt@example.com',
+          lastName: 'Петров',
+          firstName: 'Пётр',
+          phone: '+7 (999) 222-33-44',
+          contactChannel: 'Telegram',
+          cityLabel: 'Санкт-Петербург',
+          deliveryCode: 'PICKUP',
+          deliveryTitle: 'Самовывоз',
+          items: [{ variantId: product.variants[0].id, qty: 1 }],
+        })
+        .expect(201);
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].text).toContain('оформлен');
+      expect(sent[0].text).toContain('Verified Beef');
+      expect(sent[0].html).toContain('cid:');
+      expect(sent[0].attachments?.length).toBeGreaterThan(0);
+      expect(sent[0].html).not.toContain('войдите на сайте');
+    } finally {
       await created.app.close();
     }
   });
@@ -193,6 +298,9 @@ describe('Ozon Pay (e2e)', () => {
     try {
       const order = await prisma.order.create({
         data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
           status: 'NEW',
           phone: '+79990001122',
           contactChannel: 'telegram',
@@ -250,6 +358,9 @@ describe('Ozon Pay (e2e)', () => {
 
       const order = await prisma.order.create({
         data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
           userId: user.id,
           status: 'NEW',
           phone: '+79990001122',

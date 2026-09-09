@@ -2,6 +2,7 @@ export type ProductVariantDto = {
   id?: string;
   sku: string;
   weight: string;
+  weightGrams: number;
   price: number;
   stock: number;
   sortOrder?: number;
@@ -70,6 +71,7 @@ export function parseVariantInputs(raw: unknown): ProductVariantDto[] {
       id?: unknown;
       sku?: unknown;
       weight?: unknown;
+      weightGrams?: unknown;
       price?: unknown;
       stock?: unknown;
       sortOrder?: unknown;
@@ -78,6 +80,7 @@ export function parseVariantInputs(raw: unknown): ProductVariantDto[] {
       .trim()
       .toUpperCase();
     const weight = String(row.weight ?? '').trim();
+    const weightGrams = Math.round(Number(row.weightGrams));
     const price = Number(row.price);
     const stock = Number(row.stock ?? 0);
     const id = row.id != null ? String(row.id).trim() || undefined : undefined;
@@ -86,11 +89,13 @@ export function parseVariantInputs(raw: unknown): ProductVariantDto[] {
         ? Math.round(Number(row.sortOrder))
         : index;
     if (!sku || !weight || !Number.isFinite(price) || price < 0) continue;
+    if (!Number.isFinite(weightGrams) || weightGrams < 1) continue;
     if (!Number.isFinite(stock) || stock < 0) continue;
     parsed.push({
       ...(id ? { id } : {}),
       sku,
       weight,
+      weightGrams,
       price: Math.round(price * 100) / 100,
       stock: Math.round(stock),
       sortOrder,

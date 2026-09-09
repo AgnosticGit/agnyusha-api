@@ -26,6 +26,12 @@ export class ProductVariantInput {
   @MinLength(1)
   weight!: string;
 
+  /** Real shipping weight in grams. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  weightGrams!: number;
+
   @IsNumber()
   @Min(0)
   price!: number;
@@ -120,6 +126,10 @@ export class UpsertProductDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isPopular?: boolean;
 }
 
 export class UpdateStockDto {

@@ -72,6 +72,9 @@ describe('Admin orders CRM (e2e)', () => {
       data: {
         userId: buyer.id,
         status: OrderStatus.NEW,
+        email: buyer.email,
+        lastName: 'Иванов',
+        firstName: 'Иван',
         phone: '+79990001122',
         contactChannel: 'telegram',
         cityLabel: 'Москва',
@@ -86,6 +89,7 @@ describe('Admin orders CRM (e2e)', () => {
               productName: product!.name,
               image: product!.image,
               weight: variant.weight,
+              weightGrams: variant.weightGrams,
               price: variant.price,
               qty: 1,
             },
