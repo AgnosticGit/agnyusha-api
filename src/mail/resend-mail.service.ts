@@ -25,6 +25,10 @@ export class ResendMailService {
     }
   }
 
+  isConfigured(): boolean {
+    return Boolean(this.client && this.from && this.driver === 'resend');
+  }
+
   send: MailSend = async (input: SendMailInput) => {
     if (this.driver !== 'resend') {
       throw new Error(`Unsupported MAIL_DRIVER: ${this.driver}`);

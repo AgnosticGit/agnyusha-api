@@ -4,10 +4,12 @@ import { CartModule } from '../cart/cart.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import {
+  AdminOnlyGuard,
   AnalyticsAccessGuard,
   AuthGuard,
   ManageUsersGuard,
   OptionalAuthGuard,
+  OrdersAccessGuard,
   PermissionsGuard,
   ProductsAccessGuard,
 } from './auth.guard';
@@ -24,6 +26,8 @@ import { GOOGLE_FETCH } from './google.tokens';
     PermissionsGuard,
     ProductsAccessGuard,
     AnalyticsAccessGuard,
+    OrdersAccessGuard,
+    AdminOnlyGuard,
     {
       provide: GOOGLE_FETCH,
       useValue: fetch,
@@ -37,6 +41,8 @@ import { GOOGLE_FETCH } from './google.tokens';
     PermissionsGuard,
     ProductsAccessGuard,
     AnalyticsAccessGuard,
+    OrdersAccessGuard,
+    AdminOnlyGuard,
   ],
 })
 export class AuthModule {}

@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { resolvePublicWebUrl } from '../common/web-origin';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { createRawToken, hashToken } from './auth.crypto';
@@ -78,8 +79,7 @@ export class AuthService {
   }
 
   webOrigin(): string {
-    const cors = this.config.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
-    return cors.split(',')[0]?.trim() || 'http://localhost:3000';
+    return resolvePublicWebUrl(this.config);
   }
 
   private googleConfig() {

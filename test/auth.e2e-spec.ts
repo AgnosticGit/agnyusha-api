@@ -190,6 +190,75 @@ describe('Auth magic link (e2e)', () => {
     await request(app.getHttpServer()).get('/api/admin/products').expect(401);
   });
 
+  it('updates profile for authenticated user', async () => {
+    sent.length = 0;
+    const email = 'profile-update@example.com';
+    const prisma = app.get(PrismaService);
+    await prisma.session.deleteMany({ where: { user: { email } } });
+    await prisma.magicLink.deleteMany({ where: { user: { email } } });
+    await prisma.user.deleteMany({ where: { email } });
+
+    await request(app.getHttpServer())
+      .post('/api/auth/magic-link')
+      .send({ email })
+      .expect(200);
+    const token = extractToken(sent[0].text);
+    const verify = await request(app.getHttpServer())
+      .post('/api/auth/verify')
+      .send({ token })
+      .expect(200);
+    const cookie = cookieHeader(verify.headers['set-cookie']);
+
+    const res = await request(app.getHttpServer())
+      .patch('/api/auth/profile')
+      .set('Cookie', cookie)
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        phone: '+7 (999) 123-45-67',
+        lastName: 'Иванов',
+        firstName: 'Иван',
+        middleName: 'Иванович',
+      })
+      .expect(200);
+
+    expect(res.body.user.email).toBe(email);
+    expect(res.body.user.lastName).toBe('Иванов');
+    expect(res.body.user.firstName).toBe('Иван');
+    expect(res.body.user.middleName).toBe('Иванович');
+    expect(res.body.user.phone).toContain('999');
+  });
+
+  it('rejects incomplete profile update', async () => {
+    sent.length = 0;
+    const email = 'profile-bad@example.com';
+    const prisma = app.get(PrismaService);
+    await prisma.session.deleteMany({ where: { user: { email } } });
+    await prisma.magicLink.deleteMany({ where: { user: { email } } });
+    await prisma.user.deleteMany({ where: { email } });
+
+    await request(app.getHttpServer())
+      .post('/api/auth/magic-link')
+      .send({ email })
+      .expect(200);
+    const token = extractToken(sent[0].text);
+    const verify = await request(app.getHttpServer())
+      .post('/api/auth/verify')
+      .send({ token })
+      .expect(200);
+    const cookie = cookieHeader(verify.headers['set-cookie']);
+
+    await request(app.getHttpServer())
+      .patch('/api/auth/profile')
+      .set('Cookie', cookie)
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        phone: '123',
+        lastName: 'Иванов',
+        firstName: 'Иван',
+      })
+      .expect(400);
+  });
+
   it('returns 403 for non-admin on admin routes', async () => {
     sent.length = 0;
     const email = 'auth-user-role@example.com';

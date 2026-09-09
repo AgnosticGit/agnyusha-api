@@ -538,6 +538,9 @@ describe('Catalog admin & orders (e2e)', () => {
       .expect(200);
     expect(analytics.body.totals).toBeDefined();
     expect(Array.isArray(analytics.body.revenueByDay)).toBe(true);
+    expect(Array.isArray(analytics.body.productOptions)).toBe(true);
+    expect(analytics.body.selectedProduct).toBeNull();
+    expect(Array.isArray(analytics.body.byVariant)).toBe(true);
 
     const ranged = await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')
@@ -552,6 +555,25 @@ describe('Catalog admin & orders (e2e)', () => {
       .query({ from: '2020-01-01', to: '2022-01-01' })
       .set('Cookie', manager.cookie)
       .expect(400);
+
+    const productAnalytics = await request(app.getHttpServer())
+      .get('/api/admin/analytics/overview')
+      .query({ productId: created.body.id })
+      .set('Cookie', manager.cookie)
+      .expect(200);
+    expect(productAnalytics.body.selectedProduct).toEqual(
+      expect.objectContaining({
+        id: created.body.id,
+        name: created.body.name,
+      }),
+    );
+    expect(Array.isArray(productAnalytics.body.byVariant)).toBe(true);
+
+    await request(app.getHttpServer())
+      .get('/api/admin/analytics/overview')
+      .query({ productId: 'missing-product-id' })
+      .set('Cookie', manager.cookie)
+      .expect(404);
 
     const promoted = await request(app.getHttpServer())
       .patch(`/api/admin/users/${staffUser.id}/role`)

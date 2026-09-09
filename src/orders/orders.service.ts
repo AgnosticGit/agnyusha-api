@@ -15,6 +15,7 @@ import type { CreateOrderDto } from './dto/create-order.dto';
 import type { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
 import { isInventoryEnabled } from '../common/inventory';
 import { resolveWeightGrams } from '../common/weight';
+import { resolvePublicWebUrl } from '../common/web-origin';
 import {
   formatPersonName,
   normalizeEmail,
@@ -71,8 +72,7 @@ export class OrdersService {
   }
 
   private webOrigin(): string {
-    const cors = this.config.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
-    return cors.split(',')[0]?.trim() || 'http://localhost:3000';
+    return resolvePublicWebUrl(this.config);
   }
 
   private async notifyOrderReceipt(input: {

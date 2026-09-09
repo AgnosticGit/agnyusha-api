@@ -14,6 +14,7 @@ import { SESSION_COOKIE } from './auth.crypto';
 import type { AuthUser } from './auth.types';
 import {
   canAccessAnalytics,
+  canAccessSystemHealth,
   canManageOrders,
   canManageUsers,
   hasAnyProductPermission,
@@ -27,16 +28,33 @@ export const PERMISSIONS_KEY = 'permissions';
 export const RequirePermissions = (...permissions: StaffPermission[]) =>
   SetMetadata(PERMISSIONS_KEY, permissions);
 
+async function loadOptionalUser(
+  auth: AuthService,
+  req: AuthedRequest,
+): Promise<AuthUser | null> {
+  const user = await auth.getUserBySessionToken(
+    req.cookies?.[SESSION_COOKIE],
+  );
+  if (user) req.user = user;
+  return user;
+}
+
+async function requireUser(
+  auth: AuthService,
+  req: AuthedRequest,
+): Promise<AuthUser> {
+  const user = await loadOptionalUser(auth, req);
+  if (!user) throw new UnauthorizedException('Нужна авторизация');
+  return user;
+}
+
 @Injectable()
 export class OptionalAuthGuard implements CanActivate {
   constructor(private readonly auth: AuthService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.getUserBySessionToken(
-      req.cookies?.[SESSION_COOKIE],
-    );
-    if (user) req.user = user;
+    await loadOptionalUser(this.auth, req);
     return true;
   }
 }
@@ -47,11 +65,7 @@ export class AuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.getUserBySessionToken(
-      req.cookies?.[SESSION_COOKIE],
-    );
-    if (!user) throw new UnauthorizedException('Нужна авторизация');
-    req.user = user;
+    await requireUser(this.auth, req);
     return true;
   }
 }
@@ -63,14 +77,10 @@ export class ManageUsersGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.getUserBySessionToken(
-      req.cookies?.[SESSION_COOKIE],
-    );
-    if (!user) throw new UnauthorizedException('Нужна авторизация');
+    const user = await requireUser(this.auth, req);
     if (!canManageUsers(user.role)) {
       throw new ForbiddenException('Недостаточно прав');
     }
-    req.user = user;
     return true;
   }
 }
@@ -85,11 +95,7 @@ export class PermissionsGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.getUserBySessionToken(
-      req.cookies?.[SESSION_COOKIE],
-    );
-    if (!user) throw new UnauthorizedException('Нужна авторизация');
-    req.user = user;
+    const user = await requireUser(this.auth, req);
 
     if (user.role === UserRole.ADMIN) return true;
 
@@ -118,14 +124,10 @@ export class ProductsAccessGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.getUserBySessionToken(
-      req.cookies?.[SESSION_COOKIE],
-    );
-    if (!user) throw new UnauthorizedException('Нужна авторизация');
+    const user = await requireUser(this.auth, req);
     if (!hasAnyProductPermission(user)) {
       throw new ForbiddenException('Недостаточно прав');
     }
-    req.user = user;
     return true;
   }
 }
@@ -136,14 +138,10 @@ export class AnalyticsAccessGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.getUserBySessionToken(
-      req.cookies?.[SESSION_COOKIE],
-    );
-    if (!user) throw new UnauthorizedException('Нужна авторизация');
+    const user = await requireUser(this.auth, req);
     if (!canAccessAnalytics(user)) {
       throw new ForbiddenException('Недостаточно прав');
     }
-    req.user = user;
     return true;
   }
 }
@@ -155,14 +153,25 @@ export class OrdersAccessGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.getUserBySessionToken(
-      req.cookies?.[SESSION_COOKIE],
-    );
-    if (!user) throw new UnauthorizedException('Нужна авторизация');
+    const user = await requireUser(this.auth, req);
     if (!canManageOrders(user)) {
       throw new ForbiddenException('Недостаточно прав');
     }
-    req.user = user;
+    return true;
+  }
+}
+
+/** System health monitoring — ADMIN only. */
+@Injectable()
+export class AdminOnlyGuard implements CanActivate {
+  constructor(private readonly auth: AuthService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<AuthedRequest>();
+    const user = await requireUser(this.auth, req);
+    if (!canAccessSystemHealth(user)) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
     return true;
   }
 }

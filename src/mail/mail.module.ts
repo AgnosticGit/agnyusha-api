@@ -11,6 +11,6 @@ import { ResendMailService } from './resend-mail.service';
       inject: [ResendMailService],
     },
   ],
-  exports: [MAIL_SEND],
+  exports: [MAIL_SEND, ResendMailService],
 })
 export class MailModule {}

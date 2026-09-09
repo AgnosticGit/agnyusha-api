@@ -5,6 +5,11 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  REGION_HINT,
+  readErrorBody,
+  sanitizeSearchName,
+} from '../common/http-utils';
 import { CDEK_FETCH, type CdekFetch } from './cdek.tokens';
 
 type TokenCache = {
@@ -40,17 +45,6 @@ type CdekDeliveryPoint = {
   is_handout?: boolean;
   take_only?: boolean;
 };
-
-const REGION_HINT =
-  /область|край|республика|округ|Москва|Петербург|Севастополь/i;
-
-function sanitizeSearchName(value: string) {
-  return value
-    .normalize('NFKC')
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .trim()
-    .slice(0, 100);
-}
 
 function mapSuggestCity(row: CdekSuggestCity) {
   const parts = row.full_name.split(',').map((p) => p.trim());
@@ -102,6 +96,11 @@ export class CdekService {
     this.tokenCache = null;
   }
 
+  /** Health probe: obtain (or refresh) OAuth token. */
+  async ping(): Promise<void> {
+    await this.getAccessToken(true);
+  }
+
   private assertConfigured() {
     if (!this.isConfigured()) {
       throw new ServiceUnavailableException(
@@ -111,12 +110,7 @@ export class CdekService {
   }
 
   private async readErrorBody(res: Response): Promise<string> {
-    try {
-      const text = await res.text();
-      return text.slice(0, 300);
-    } catch {
-      return '';
-    }
+    return readErrorBody(res, 300);
   }
 
   private async getAccessToken(forceRefresh = false): Promise<string> {

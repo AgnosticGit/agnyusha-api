@@ -15,6 +15,7 @@ import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { SlidingWindowRateLimiter } from '../common/rate-limit';
 import { resolveWeightGrams } from '../common/weight';
 import { formatPersonName } from '../common/person-name';
+import { resolvePublicWebUrl } from '../common/web-origin';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
 
@@ -51,6 +52,40 @@ export class PaymentsService {
     return Boolean(this.accessKey());
   }
 
+  /**
+   * Health probe: verify credentials shape against Ozon API.
+   * Uses getOrderDetails with a sentinel id — auth failures vs missing order
+   * distinguish bad keys from healthy API reachability.
+   */
+  async ping(): Promise<{ ok: boolean; message: string }> {
+    const accessKey = this.accessKey();
+    if (!accessKey) {
+      return { ok: false, message: 'OZON_PAY_ACCESS_KEY не задан' };
+    }
+
+    const res = await fetch(`${this.apiBase()}/getOrderDetails`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accessKey,
+        orderNumber: '__agnyusha_health_probe__',
+      }),
+    });
+
+    // Reachable API with valid key typically returns 4xx for unknown order.
+    // 401/403 → bad credentials. Network errors throw above.
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, message: `Ozon Pay отклонил ключ (${res.status})` };
+    }
+    if (res.status >= 500) {
+      return { ok: false, message: `Ozon Pay недоступен (${res.status})` };
+    }
+    return {
+      ok: true,
+      message: `API отвечает (HTTP ${res.status})`,
+    };
+  }
+
   private accessKey() {
     return (this.config.get<string>('OZON_PAY_ACCESS_KEY') ?? '').trim();
   }
@@ -64,12 +99,7 @@ export class PaymentsService {
   }
 
   private publicWebUrl() {
-    const fromEnv = (this.config.get<string>('PUBLIC_WEB_URL') ?? '').trim();
-    if (fromEnv) return fromEnv.replace(/\/$/, '');
-    const cors = (this.config.get<string>('CORS_ORIGIN') ?? '')
-      .split(',')[0]
-      ?.trim();
-    return (cors || 'http://localhost:3000').replace(/\/$/, '');
+    return resolvePublicWebUrl(this.config);
   }
 
   /** Amount in kopecks for Ozon Pay. */

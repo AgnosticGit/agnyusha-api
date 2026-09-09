@@ -6,6 +6,11 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  REGION_HINT,
+  readErrorBody,
+  sanitizeSearchName,
+} from '../common/http-utils';
 import { YANDEX_FETCH, type YandexFetch } from './yandex.tokens';
 
 type YandexDetectVariant = {
@@ -74,17 +79,6 @@ export type YandexCreatePickupOrderResult = {
   deliveryFrom: string | null;
   deliveryTo: string | null;
 };
-
-const REGION_HINT =
-  /область|край|республика|округ|Москва|Петербург|Севастополь/i;
-
-function sanitizeSearchName(value: string) {
-  return value
-    .normalize('NFKC')
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .trim()
-    .slice(0, 100);
-}
 
 function formatAddress(
   address: YandexPickupPoint['address'],
@@ -221,6 +215,11 @@ export class YandexDeliveryService {
     return this.baseUrl.includes('tst.yandex.net');
   }
 
+  /** Health probe: light location detect call. */
+  async ping(): Promise<void> {
+    await this.detectLocations('Москва', 1);
+  }
+
   private assertConfigured() {
     if (!this.isConfigured()) {
       throw new ServiceUnavailableException(
@@ -230,12 +229,7 @@ export class YandexDeliveryService {
   }
 
   private async readErrorBody(res: Response): Promise<string> {
-    try {
-      const text = await res.text();
-      return text.slice(0, 400);
-    } catch {
-      return '';
-    }
+    return readErrorBody(res, 400);
   }
 
   private async yandexRequest<T>(
