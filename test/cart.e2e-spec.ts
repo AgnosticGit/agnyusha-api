@@ -88,8 +88,20 @@ describe('Cart guest persist & merge (e2e)', () => {
         name: 'Cart Active Feed',
         category: 'DOGS',
         variants: [
-          { sku: 'CART-ACTIVE-01', weight: '1 кг.', weightGrams: 1000, price: 500, stock: 10 },
-          { sku: 'CART-LOW-01', weight: '2 кг.', weightGrams: 2000, price: 900, stock: 3 },
+          {
+            sku: 'CART-ACTIVE-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 500,
+            stock: 10,
+          },
+          {
+            sku: 'CART-LOW-01',
+            weight: '2 кг.',
+            weightGrams: 2000,
+            price: 900,
+            stock: 3,
+          },
         ],
         ingredients: 't',
         description: 't',
@@ -107,7 +119,13 @@ describe('Cart guest persist & merge (e2e)', () => {
         name: 'Cart Inactive Feed',
         category: 'CATS',
         variants: [
-          { sku: 'CART-INACTIVE-01', weight: '0,5 кг.', weightGrams: 500, price: 400, stock: 8 },
+          {
+            sku: 'CART-INACTIVE-01',
+            weight: '0,5 кг.',
+            weightGrams: 500,
+            price: 400,
+            stock: 8,
+          },
         ],
         ingredients: 't',
         description: 't',
@@ -141,7 +159,9 @@ describe('Cart guest persist & merge (e2e)', () => {
       },
     });
     if (productId) {
-      await prisma.product.delete({ where: { id: productId } }).catch(() => undefined);
+      await prisma.product
+        .delete({ where: { id: productId } })
+        .catch(() => undefined);
     }
     if (inactiveProductId) {
       await prisma.product
@@ -236,7 +256,10 @@ describe('Cart guest persist & merge (e2e)', () => {
       .expect(200);
     expect(guestAdd.body.items).toHaveLength(1);
     expect(guestAdd.body.items[0].productSlug).toBeTruthy();
-    const guestCookie = pickCookie(guestAdd.headers['set-cookie'], CART_COOKIE)!;
+    const guestCookie = pickCookie(
+      guestAdd.headers['set-cookie'],
+      CART_COOKIE,
+    )!;
 
     const verify = await request(app.getHttpServer())
       .post('/api/auth/verify')
@@ -274,7 +297,10 @@ describe('Cart guest persist & merge (e2e)', () => {
       .put('/api/cart/items')
       .send({ variantId: lowStockVariantId, qty: 2 })
       .expect(200);
-    const guestCookie = pickCookie(guestAdd.headers['set-cookie'], CART_COOKIE)!;
+    const guestCookie = pickCookie(
+      guestAdd.headers['set-cookie'],
+      CART_COOKIE,
+    )!;
 
     const merged = await request(app.getHttpServer())
       .get('/api/cart')
@@ -312,13 +338,17 @@ describe('Cart guest persist & merge (e2e)', () => {
       .put('/api/cart/items')
       .send({ variantId: inactiveVariantId, qty: 1 })
       .expect(200);
-    let guestCookie = pickCookie(guestInactive.headers['set-cookie'], CART_COOKIE)!;
+    let guestCookie = pickCookie(
+      guestInactive.headers['set-cookie'],
+      CART_COOKIE,
+    )!;
 
     const oosVariant = await prisma.productVariant.create({
       data: {
         productId,
         sku: `CART-OOS-${Date.now()}`,
-        weight: '3 кг.', weightGrams: 3000,
+        weight: '3 кг.',
+        weightGrams: 3000,
         price: 100,
         stock: 5,
       },
@@ -328,7 +358,8 @@ describe('Cart guest persist & merge (e2e)', () => {
       .set('Cookie', guestCookie)
       .send({ variantId: oosVariant.id, qty: 2 })
       .expect(200);
-    guestCookie = pickCookie(guestOos.headers['set-cookie'], CART_COOKIE) ?? guestCookie;
+    guestCookie =
+      pickCookie(guestOos.headers['set-cookie'], CART_COOKIE) ?? guestCookie;
 
     await request(app.getHttpServer())
       .put('/api/cart/items')
@@ -351,9 +382,9 @@ describe('Cart guest persist & merge (e2e)', () => {
       .expect(200);
 
     if (process.env.INVENTORY_ENABLED === 'true') {
-      expect(merged.body.items.map((i: { variantId: string }) => i.variantId)).toEqual([
-        variantId,
-      ]);
+      expect(
+        merged.body.items.map((i: { variantId: string }) => i.variantId),
+      ).toEqual([variantId]);
       expect(merged.body.adjustments.removed).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -367,9 +398,9 @@ describe('Cart guest persist & merge (e2e)', () => {
         ]),
       );
     } else {
-      expect(merged.body.items.map((i: { variantId: string }) => i.variantId).sort()).toEqual(
-        [variantId, oosVariant.id].sort(),
-      );
+      expect(
+        merged.body.items.map((i: { variantId: string }) => i.variantId).sort(),
+      ).toEqual([variantId, oosVariant.id].sort());
       expect(merged.body.adjustments.removed).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -397,7 +428,10 @@ describe('Cart guest persist & merge (e2e)', () => {
       .put('/api/cart/items')
       .send({ variantId, qty: 1 })
       .expect(200);
-    const guestCookie = pickCookie(guestAdd.headers['set-cookie'], CART_COOKIE)!;
+    const guestCookie = pickCookie(
+      guestAdd.headers['set-cookie'],
+      CART_COOKIE,
+    )!;
 
     await request(app.getHttpServer())
       .get('/api/cart')
@@ -409,9 +443,11 @@ describe('Cart guest persist & merge (e2e)', () => {
       .set('Cookie', user.cookie)
       .expect(200);
 
-    expect(onlySession.body.items.some((i: { variantId: string }) => i.variantId === variantId)).toBe(
-      true,
-    );
+    expect(
+      onlySession.body.items.some(
+        (i: { variantId: string }) => i.variantId === variantId,
+      ),
+    ).toBe(true);
   });
 
   it('DELETE item and clear cart', async () => {

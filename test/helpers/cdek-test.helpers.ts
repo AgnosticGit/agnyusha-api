@@ -58,8 +58,7 @@ export function applyTestDeliveryEnv(options?: {
   if (cdek === 'present') {
     process.env.CDEK_CLIENT_ID = 'test-client-id';
     process.env.CDEK_CLIENT_SECRET = 'test-client-secret';
-    process.env.CDEK_FROM_LOCATION =
-      process.env.CDEK_FROM_LOCATION || 'MSK1';
+    process.env.CDEK_FROM_LOCATION = process.env.CDEK_FROM_LOCATION || 'MSK1';
     process.env.CDEK_TARIFF_CODE = process.env.CDEK_TARIFF_CODE || '136';
   } else {
     process.env.CDEK_CLIENT_ID = '';

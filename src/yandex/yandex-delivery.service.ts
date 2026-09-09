@@ -80,9 +80,12 @@ export type YandexCreatePickupOrderResult = {
   deliveryTo: string | null;
 };
 
-function formatAddress(
-  address: YandexPickupPoint['address'],
-): { full: string; city: string; region: string; postalCode: string | null } {
+function formatAddress(address: YandexPickupPoint['address']): {
+  full: string;
+  city: string;
+  region: string;
+  postalCode: string | null;
+} {
   if (!address) {
     return { full: '', city: '', region: '', postalCode: null };
   }
@@ -107,10 +110,7 @@ const YANDEX_DAY_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', '�
 function formatClock(part?: { hours?: number; minutes?: number } | null) {
   if (part?.hours == null || !Number.isFinite(part.hours)) return null;
   const hours = Math.min(23, Math.max(0, Math.trunc(part.hours)));
-  const minutes = Math.min(
-    59,
-    Math.max(0, Math.trunc(part.minutes ?? 0)),
-  );
+  const minutes = Math.min(59, Math.max(0, Math.trunc(part.minutes ?? 0)));
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
@@ -197,9 +197,7 @@ export class YandexDeliveryService {
   }
 
   private get platformStationId() {
-    return (
-      this.config.get<string>('YANDEX_PLATFORM_STATION_ID')?.trim() || ''
-    );
+    return this.config.get<string>('YANDEX_PLATFORM_STATION_ID')?.trim() || '';
   }
 
   isConfigured() {
@@ -281,9 +279,7 @@ export class YandexDeliveryService {
       const parts = row.address.split(',').map((p) => p.trim());
       const cityName = parts[0] || row.address;
       const region =
-        parts.find((p) => REGION_HINT.test(p)) ||
-        parts[parts.length - 1] ||
-        '';
+        parts.find((p) => REGION_HINT.test(p)) || parts[parts.length - 1] || '';
 
       return {
         geoId: row.geo_id,
@@ -363,10 +359,9 @@ export class YandexDeliveryService {
       request_id?: string;
       state?: { status?: string; description?: string };
       sharing_url?: string;
-    }>(
-      `/api/b2b/platform/request/info?request_id=${encodeURIComponent(id)}`,
-      { method: 'GET' },
-    );
+    }>(`/api/b2b/platform/request/info?request_id=${encodeURIComponent(id)}`, {
+      method: 'GET',
+    });
 
     return {
       requestId: data.request_id?.trim() || id,

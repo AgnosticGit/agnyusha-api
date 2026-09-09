@@ -46,7 +46,8 @@ describe('Delivery tracking poll (e2e)', () => {
           create: [
             {
               sku: `TRK-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              weight: '0,8 кг.', weightGrams: 800,
+              weight: '0,8 кг.',
+              weightGrams: 800,
               price: 500,
               stock: 10,
             },
@@ -128,8 +129,7 @@ describe('Delivery tracking poll (e2e)', () => {
       expect(created.body.deliveryTracking).toEqual(
         expect.objectContaining({
           trackNumber: '1100654321',
-          trackingUrl:
-            'https://www.cdek.ru/ru/tracking?order_id=1100654321',
+          trackingUrl: 'https://www.cdek.ru/ru/tracking?order_id=1100654321',
         }),
       );
 
@@ -153,7 +153,9 @@ describe('Delivery tracking poll (e2e)', () => {
 
       await prisma.order.delete({ where: { id: created.body.id } });
       await prisma.product.delete({ where: { id: product.id } });
-      await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
     } finally {
       await app.close();
     }
@@ -213,7 +215,8 @@ describe('Delivery tracking poll (e2e)', () => {
               {
                 productName: 'Корм',
                 image: '/assets/product-turkey.png',
-                weight: '1 кг.', weightGrams: 1000,
+                weight: '1 кг.',
+                weightGrams: 1000,
                 price: 500,
                 qty: 1,
               },
@@ -227,7 +230,9 @@ describe('Delivery tracking poll (e2e)', () => {
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
 
-      const row = listed.body.items.find((o: { id: string }) => o.id === order.id);
+      const row = listed.body.items.find(
+        (o: { id: string }) => o.id === order.id,
+      );
       expect(row.deliveryTracking).toEqual(
         expect.objectContaining({
           statusCode: 'DELIVERY_AT_START',
@@ -245,7 +250,9 @@ describe('Delivery tracking poll (e2e)', () => {
       expect(infoCalls).toBe(1);
 
       await prisma.order.delete({ where: { id: order.id } });
-      await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
     } finally {
       await app.close();
     }
@@ -309,7 +316,8 @@ describe('Delivery tracking poll (e2e)', () => {
               {
                 productName: 'Корм',
                 image: '/assets/product-turkey.png',
-                weight: '1 кг.', weightGrams: 1000,
+                weight: '1 кг.',
+                weightGrams: 1000,
                 price: 500,
                 qty: 1,
               },
@@ -323,14 +331,18 @@ describe('Delivery tracking poll (e2e)', () => {
         .send({ extId: order.id, status: 'STATUS_PAID' })
         .expect(200);
 
-      const updated = await prisma.order.findUnique({ where: { id: order.id } });
+      const updated = await prisma.order.findUnique({
+        where: { id: order.id },
+      });
       expect(updated?.paidAt).toBeTruthy();
       expect(updated?.externalDeliveryId).toBe('cdek-after-pay');
       expect(updated?.deliveryTrackNumber).toBe('998877');
       expect(updated?.deliveryTrackingUrl).toContain('998877');
 
       await prisma.order.delete({ where: { id: order.id } });
-      await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
     } finally {
       await app.close();
     }

@@ -8,7 +8,11 @@ import { ResendMailService } from '../mail/resend-mail.service';
 import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
-import type { HealthCheckItem, HealthReport, HealthStatus } from './health.types';
+import type {
+  HealthCheckItem,
+  HealthReport,
+  HealthStatus,
+} from './health.types';
 
 const PROBE_TIMEOUT_MS = 5_000;
 
@@ -82,11 +86,7 @@ export class HealthService {
 
     const started = Date.now();
     try {
-      const result = await withTimeout(
-        probe(),
-        PROBE_TIMEOUT_MS,
-        id,
-      );
+      const result = await withTimeout(probe(), PROBE_TIMEOUT_MS, id);
       return {
         id,
         name,

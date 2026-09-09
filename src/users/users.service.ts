@@ -3,11 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  StaffPermission,
-  UserRole,
-  type Prisma,
-} from '@prisma/client';
+import { StaffPermission, UserRole, type Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ALL_STAFF_PERMISSIONS } from '../auth/permissions';
 
@@ -99,9 +95,7 @@ export class UsersService {
       permsByUser.set(row.userId, list);
     }
 
-    const items = rows.map((u) =>
-      this.mapUser(u, permsByUser.get(u.id) ?? []),
-    );
+    const items = rows.map((u) => this.mapUser(u, permsByUser.get(u.id) ?? []));
     return { items, total, page, limit };
   }
 
@@ -119,7 +113,11 @@ export class UsersService {
       throw new ForbiddenException('Нельзя снять роль главного админа');
     }
 
-    if (target.id === actorId && role !== target.role && target.role === UserRole.ADMIN) {
+    if (
+      target.id === actorId &&
+      role !== target.role &&
+      target.role === UserRole.ADMIN
+    ) {
       throw new ForbiddenException('Нельзя снять админку с самого себя');
     }
 
@@ -165,7 +163,12 @@ export class UsersService {
     );
   }
 
-  async setBanned(actorId: string, actorRole: UserRole, userId: string, banned: boolean) {
+  async setBanned(
+    actorId: string,
+    actorRole: UserRole,
+    userId: string,
+    banned: boolean,
+  ) {
     const target = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!target) throw new NotFoundException('Пользователь не найден');
 
@@ -198,10 +201,7 @@ export class UsersService {
       ]);
     }
 
-    return this.mapUser(
-      user,
-      await this.permissionsFor(user.id, user.role),
-    );
+    return this.mapUser(user, await this.permissionsFor(user.id, user.role));
   }
 
   async remove(actorId: string, actorRole: UserRole, userId: string) {

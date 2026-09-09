@@ -17,10 +17,10 @@ async function bootstrap() {
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads/' });
   app.setGlobalPrefix('api');
 
-  const corsOrigins =
-    config.get<string>('CORS_ORIGIN')?.split(',').map((o) => o.trim()) ?? [
-      'http://localhost:3000',
-    ];
+  const corsOrigins = config
+    .get<string>('CORS_ORIGIN')
+    ?.split(',')
+    .map((o) => o.trim()) ?? ['http://localhost:3000'];
   app.use(createOriginGuard(corsOrigins));
   app.useGlobalPipes(
     new ValidationPipe({
@@ -43,4 +43,4 @@ async function bootstrap() {
     `API listening on http://localhost:${port} [${config.get('NODE_ENV')}]`,
   );
 }
-bootstrap();
+void bootstrap();

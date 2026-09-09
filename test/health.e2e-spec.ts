@@ -7,13 +7,13 @@ import {
   jsonResponse,
 } from './helpers/cdek-test.helpers';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { hashToken, createRawToken, SESSION_COOKIE } from '../src/auth/auth.crypto';
+import {
+  hashToken,
+  createRawToken,
+  SESSION_COOKIE,
+} from '../src/auth/auth.crypto';
 
-async function loginAs(
-  app: INestApplication,
-  email: string,
-  role: UserRole,
-) {
+async function loginAs(app: INestApplication, email: string, role: UserRole) {
   const prisma = app.get(PrismaService);
   const user = await prisma.user.upsert({
     where: { email },

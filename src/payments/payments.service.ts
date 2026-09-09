@@ -230,9 +230,11 @@ export class PaymentsService {
     };
   }
 
-  private async fetchOzonOrderDetails(
-    extId: string,
-  ): Promise<{ id: string | null; status: string; payLink: string | null } | null> {
+  private async fetchOzonOrderDetails(extId: string): Promise<{
+    id: string | null;
+    status: string;
+    payLink: string | null;
+  } | null> {
     const accessKey = this.accessKey();
     if (!accessKey) return null;
 
@@ -280,9 +282,7 @@ export class PaymentsService {
     headers: Record<string, string | string[] | undefined>,
   ): Promise<{ ok: true }> {
     const payload =
-      body && typeof body === 'object'
-        ? (body as Record<string, unknown>)
-        : {};
+      body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
 
     const nested =
       payload.order && typeof payload.order === 'object'

@@ -70,8 +70,7 @@ export class DeliveryService {
       if (m.code === DeliveryMethodCode.YANDEX) {
         const ready = this.yandex.isOrderCreationConfigured();
         const moscowOnly = this.yandex.isTestEnvironment();
-        const available =
-          ready && (!moscowOnly || isMoscowArea(region, label));
+        const available = ready && (!moscowOnly || isMoscowArea(region, label));
         return {
           ...m,
           available,

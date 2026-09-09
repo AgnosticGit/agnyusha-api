@@ -58,8 +58,6 @@ export function canAccessAnalytics(
 }
 
 /** System health / ops monitoring — ADMIN only. */
-export function canAccessSystemHealth(
-  user: Pick<AuthUser, 'role'>,
-): boolean {
+export function canAccessSystemHealth(user: Pick<AuthUser, 'role'>): boolean {
   return user.role === UserRole.ADMIN;
 }

@@ -104,7 +104,9 @@ export class ProductsService {
     return items.map((p) => this.map(p));
   }
 
-  async listInventory(params: { q?: string; page?: number; limit?: number } = {}) {
+  async listInventory(
+    params: { q?: string; page?: number; limit?: number } = {},
+  ) {
     const page = params.page ?? 1;
     const limit = params.limit ?? 20;
     const q = params.q?.trim();
@@ -126,10 +128,7 @@ export class ProductsService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.productVariant.findMany({
         where,
-        orderBy: [
-          { product: { sortOrder: 'asc' } },
-          { sortOrder: 'asc' },
-        ],
+        orderBy: [{ product: { sortOrder: 'asc' } }, { sortOrder: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
         include: {
@@ -215,7 +214,7 @@ export class ProductsService {
   }
 
   private async uniqueSlug(base: string, excludeId?: string) {
-    let slug = slugify(base);
+    const slug = slugify(base);
     let i = 0;
     while (true) {
       const candidate = i === 0 ? slug : `${slug}-${i}`;

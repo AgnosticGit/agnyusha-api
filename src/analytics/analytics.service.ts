@@ -9,7 +9,10 @@ import { isInventoryEnabled } from '../common/inventory';
 
 const MAX_RANGE_DAYS = 366;
 
-function parseBoundary(value: string | undefined, endOfDay: boolean): Date | null {
+function parseBoundary(
+  value: string | undefined,
+  endOfDay: boolean,
+): Date | null {
   if (!value?.trim()) return null;
   const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   if (day) {
@@ -73,9 +76,7 @@ export class AnalyticsService {
       where: {
         createdAt: { gte: start, lte: end },
         status: { not: 'CANCELLED' },
-        ...(selectedId
-          ? { items: { some: { productId: selectedId } } }
-          : {}),
+        ...(selectedId ? { items: { some: { productId: selectedId } } } : {}),
       },
       include: { items: true },
       orderBy: { createdAt: 'asc' },

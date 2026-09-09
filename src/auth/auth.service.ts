@@ -417,7 +417,9 @@ export class AuthService {
       return null;
     }
     if (session.user.bannedAt) {
-      await this.prisma.session.deleteMany({ where: { userId: session.userId } });
+      await this.prisma.session.deleteMany({
+        where: { userId: session.userId },
+      });
       return null;
     }
     return this.toAuthUser(session.user);

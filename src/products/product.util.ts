@@ -10,6 +10,17 @@ export type ProductVariantDto = {
 
 const DEFAULT_PRODUCT_IMAGE = '/assets/product-turkey.png';
 
+function toOptionalString(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return undefined;
+}
+
 /** Normalize cover + gallery; cover is always images[0]. */
 export function normalizeProductImages(
   images?: string[] | null,
@@ -76,14 +87,12 @@ export function parseVariantInputs(raw: unknown): ProductVariantDto[] {
       stock?: unknown;
       sortOrder?: unknown;
     };
-    const sku = String(row.sku ?? '')
-      .trim()
-      .toUpperCase();
-    const weight = String(row.weight ?? '').trim();
+    const sku = (toOptionalString(row.sku) ?? '').toUpperCase();
+    const weight = toOptionalString(row.weight) ?? '';
     const weightGrams = Math.round(Number(row.weightGrams));
     const price = Number(row.price);
     const stock = Number(row.stock ?? 0);
-    const id = row.id != null ? String(row.id).trim() || undefined : undefined;
+    const id = toOptionalString(row.id);
     const sortOrder =
       row.sortOrder != null && Number.isFinite(Number(row.sortOrder))
         ? Math.round(Number(row.sortOrder))

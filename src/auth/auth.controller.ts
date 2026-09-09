@@ -15,7 +15,11 @@ import {
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService, GoogleOAuthError } from './auth.service';
-import { RequestMagicLinkDto, UpdateProfileDto, VerifyMagicLinkDto } from './dto/auth.dto';
+import {
+  RequestMagicLinkDto,
+  UpdateProfileDto,
+  VerifyMagicLinkDto,
+} from './dto/auth.dto';
 import {
   CART_COOKIE,
   OAUTH_STATE_COOKIE,
@@ -42,7 +46,7 @@ function rawQueryParam(req: Request, name: string): string | undefined {
 function clientIp(req: Request): string {
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.trim()) {
-    return forwarded.split(',')[0]!.trim();
+    return forwarded.split(',')[0].trim();
   }
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
@@ -129,10 +133,7 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(200)
-  async logout(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await this.auth.logout(req.cookies?.[SESSION_COOKIE]);
     res.clearCookie(
       SESSION_COOKIE,
@@ -176,8 +177,7 @@ export class AuthController {
     }
 
     const expectedState = req.cookies?.[OAUTH_STATE_COOKIE] as
-      | string
-      | undefined;
+      string | undefined;
     if (!state || !expectedState || state !== expectedState) {
       return fail('invalid_state');
     }

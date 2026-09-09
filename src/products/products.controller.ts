@@ -62,13 +62,13 @@ const imageUploadOptions = {
     cb: (error: Error | null, acceptFile: boolean) => void,
   ) => {
     if (!MIME_TO_EXT[file.mimetype]) {
-      cb(new BadRequestException('Нужен файл изображения') as never, false);
+      cb(new BadRequestException('Нужен файл изображения'), false);
       return;
     }
     const ext = extname(file.originalname).toLowerCase();
     const allowedExt = Object.values(MIME_TO_EXT);
     if (ext && !allowedExt.includes(ext) && ext !== '.jpeg') {
-      cb(new BadRequestException('Нужен файл изображения') as never, false);
+      cb(new BadRequestException('Нужен файл изображения'), false);
       return;
     }
     cb(null, true);
@@ -78,7 +78,8 @@ const imageUploadOptions = {
 function assertImageMagic(buffer: Buffer): boolean {
   if (buffer.length < 12) return false;
   // JPEG
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return true;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff)
+    return true;
   // PNG
   if (
     buffer[0] === 0x89 &&
@@ -166,8 +167,13 @@ export class ProductsController {
 
   @Post('admin/products/:id/images')
   @UseGuards(PermissionsGuard)
-  @RequirePermissions(StaffPermission.PRODUCT_EDIT, StaffPermission.PRODUCT_CREATE)
-  @UseInterceptors(FilesInterceptor('files', MAX_PRODUCT_IMAGES, imageUploadOptions))
+  @RequirePermissions(
+    StaffPermission.PRODUCT_EDIT,
+    StaffPermission.PRODUCT_CREATE,
+  )
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_PRODUCT_IMAGES, imageUploadOptions),
+  )
   async uploadImages(
     @Param('id') id: string,
     @UploadedFiles() files?: Express.Multer.File[],

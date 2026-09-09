@@ -91,7 +91,15 @@ describe('Catalog admin & orders (e2e)', () => {
         subtitle: 'E2E',
         category: 'DOGS',
         badge: 'HIT',
-        variants: [{ sku: 'E2E-TEST-01', weight: '1 кг.', weightGrams: 1000, price: 1000, stock: 10 }],
+        variants: [
+          {
+            sku: 'E2E-TEST-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 1000,
+            stock: 10,
+          },
+        ],
         ingredients: 'test',
         description: 'test',
         isPopular: true,
@@ -113,7 +121,15 @@ describe('Catalog admin & orders (e2e)', () => {
       .send({
         name: 'HTML описание',
         category: 'DOGS',
-        variants: [{ sku: 'E2E-XSS-01', weight: '1 кг.', weightGrams: 1000, price: 500, stock: 5 }],
+        variants: [
+          {
+            sku: 'E2E-XSS-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 500,
+            stock: 5,
+          },
+        ],
         description:
           '<p>Безопасный <strong>текст</strong></p><script>alert(1)</script><img src=x onerror=alert(1)>',
       })
@@ -129,11 +145,18 @@ describe('Catalog admin & orders (e2e)', () => {
       .send({
         name: 'Кастомный бейдж',
         category: 'CATS',
-        variants: [{ sku: 'E2E-BADGE-01', weight: '1 кг.', weightGrams: 1000, price: 700, stock: 5 }],
+        variants: [
+          {
+            sku: 'E2E-BADGE-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 700,
+            stock: 5,
+          },
+        ],
         badgeLabel: 'Акция',
         badgeColor: '#c45c26',
-        ingredients:
-          '<p>Рис</p><script>alert(1)</script>',
+        ingredients: '<p>Рис</p><script>alert(1)</script>',
         description: '<p>Ок</p>',
       })
       .expect(201);
@@ -218,14 +241,26 @@ describe('Catalog admin & orders (e2e)', () => {
   });
 
   it('admin can upload multiple product images', async () => {
-    const admin = await loginAs(app, 'admin-images@example.com', UserRole.ADMIN);
+    const admin = await loginAs(
+      app,
+      'admin-images@example.com',
+      UserRole.ADMIN,
+    );
     const create = await request(app.getHttpServer())
       .post('/api/admin/products')
       .set('Cookie', admin.cookie)
       .send({
         name: 'Товар с галереей',
         category: 'DOGS',
-        variants: [{ sku: 'E2E-IMG-01', weight: '1 кг.', weightGrams: 1000, price: 500, stock: 3 }],
+        variants: [
+          {
+            sku: 'E2E-IMG-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 500,
+            stock: 3,
+          },
+        ],
         images: ['/assets/product-turkey.png'],
       })
       .expect(201);
@@ -260,7 +295,8 @@ describe('Catalog admin & orders (e2e)', () => {
           {
             id: create.body.variants[0].id,
             sku: 'E2E-IMG-01',
-            weight: '1 кг.', weightGrams: 1000,
+            weight: '1 кг.',
+            weightGrams: 1000,
             price: 500,
             stock: 3,
           },
@@ -279,11 +315,7 @@ describe('Catalog admin & orders (e2e)', () => {
   });
 
   it('admin can promote user', async () => {
-    const admin = await loginAs(
-      app,
-      'agnostex@gmail.com',
-      UserRole.ADMIN,
-    );
+    const admin = await loginAs(app, 'agnostex@gmail.com', UserRole.ADMIN);
     const target = await loginAs(app, 'promote-me@example.com', UserRole.USER);
 
     const updated = await request(app.getHttpServer())
@@ -296,11 +328,7 @@ describe('Catalog admin & orders (e2e)', () => {
   });
 
   it('admin can search and paginate users', async () => {
-    const admin = await loginAs(
-      app,
-      'agnostex@gmail.com',
-      UserRole.ADMIN,
-    );
+    const admin = await loginAs(app, 'agnostex@gmail.com', UserRole.ADMIN);
     const prisma = app.get(PrismaService);
 
     for (let i = 0; i < 5; i++) {
@@ -361,11 +389,7 @@ describe('Catalog admin & orders (e2e)', () => {
   });
 
   it('admin can ban and delete user', async () => {
-    const admin = await loginAs(
-      app,
-      'agnostex@gmail.com',
-      UserRole.ADMIN,
-    );
+    const admin = await loginAs(app, 'agnostex@gmail.com', UserRole.ADMIN);
     const target = await loginAs(app, 'ban-me@example.com', UserRole.USER);
     const prisma = app.get(PrismaService);
 
@@ -420,13 +444,19 @@ describe('Catalog admin & orders (e2e)', () => {
       .send({
         name: 'Без артикула',
         category: 'DOGS',
-        variants: [{ weight: '1 кг.', weightGrams: 1000, price: 100, stock: 1 }],
+        variants: [
+          { weight: '1 кг.', weightGrams: 1000, price: 100, stock: 1 },
+        ],
       })
       .expect(400);
   });
 
   it('staff permissions gate product and inventory APIs', async () => {
-    const manager = await loginAs(app, 'manager-e2e@example.com', UserRole.MANAGER);
+    const manager = await loginAs(
+      app,
+      'manager-e2e@example.com',
+      UserRole.MANAGER,
+    );
     const prisma = app.get(PrismaService);
     const staffUser = await prisma.user.upsert({
       where: { email: 'staff-stock@example.com' },
@@ -456,7 +486,15 @@ describe('Catalog admin & orders (e2e)', () => {
       .send({
         name: 'No create',
         category: 'DOGS',
-        variants: [{ sku: 'NOPE-01', weight: '1 кг.', weightGrams: 1000, price: 100, stock: 1 }],
+        variants: [
+          {
+            sku: 'NOPE-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 100,
+            stock: 1,
+          },
+        ],
       })
       .expect(403);
 
@@ -467,7 +505,15 @@ describe('Catalog admin & orders (e2e)', () => {
       .send({
         name: 'Stock gate',
         category: 'DOGS',
-        variants: [{ sku: 'STOCK-GATE-01', weight: '1 кг.', weightGrams: 1000, price: 100, stock: 2 }],
+        variants: [
+          {
+            sku: 'STOCK-GATE-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 100,
+            stock: 2,
+          },
+        ],
       })
       .expect(201);
 
@@ -602,7 +648,13 @@ describe('Catalog admin & orders (e2e)', () => {
         name: 'Цена с сервера',
         category: 'DOGS',
         variants: [
-          { sku: 'E2E-PRICE-01', weight: '1 кг.', weightGrams: 1000, price: 1500, stock: 5 },
+          {
+            sku: 'E2E-PRICE-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 1500,
+            stock: 5,
+          },
         ],
         ingredients: 't',
         description: 't',
@@ -685,7 +737,11 @@ describe('Catalog admin & orders (e2e)', () => {
   });
 
   it('guest can place order without session', async () => {
-    const admin = await loginAs(app, 'admin-guest-order@example.com', UserRole.ADMIN);
+    const admin = await loginAs(
+      app,
+      'admin-guest-order@example.com',
+      UserRole.ADMIN,
+    );
     const created = await request(app.getHttpServer())
       .post('/api/admin/products')
       .set('Cookie', admin.cookie)
@@ -693,7 +749,13 @@ describe('Catalog admin & orders (e2e)', () => {
         name: 'Гостевой заказ',
         category: 'DOGS',
         variants: [
-          { sku: 'E2E-GUEST-01', weight: '1 кг.', weightGrams: 1000, price: 900, stock: 4 },
+          {
+            sku: 'E2E-GUEST-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 900,
+            stock: 4,
+          },
         ],
         ingredients: 't',
         description: 't',

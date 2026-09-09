@@ -62,7 +62,7 @@ describe('Ozon Pay (e2e)', () => {
 
   it('create order returns payUrl and webhook marks order PAID', async () => {
     const originalFetch = global.fetch;
-    global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/createOrder')) {
         const body = JSON.parse(String(init?.body ?? '{}')) as {
@@ -81,7 +81,7 @@ describe('Ozon Pay (e2e)', () => {
         );
       }
       throw new Error(`Unexpected fetch: ${url}`);
-    }) as typeof fetch;
+    };
 
     process.env.OZON_PAY_ACCESS_KEY = 'test-access-key';
     process.env.OZON_PAY_NOTIFICATION_SECRET = '';
@@ -115,7 +115,8 @@ describe('Ozon Pay (e2e)', () => {
             create: [
               {
                 sku: `OZON-${Date.now()}`,
-                weight: '1 кг.', weightGrams: 1000,
+                weight: '1 кг.',
+                weightGrams: 1000,
                 price: 1,
                 stock: 5,
               },
@@ -268,7 +269,7 @@ describe('Ozon Pay (e2e)', () => {
 
   it('confirm endpoint marks PAID via getOrderDetails', async () => {
     const originalFetch = global.fetch;
-    global.fetch = (async (input: RequestInfo | URL) => {
+    global.fetch = async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/getOrderDetails')) {
         return new Response(
@@ -283,7 +284,7 @@ describe('Ozon Pay (e2e)', () => {
         );
       }
       throw new Error(`Unexpected fetch: ${url}`);
-    }) as typeof fetch;
+    };
 
     process.env.OZON_PAY_ACCESS_KEY = 'test-access-key';
     process.env.OZON_PAY_NOTIFICATION_SECRET = '';

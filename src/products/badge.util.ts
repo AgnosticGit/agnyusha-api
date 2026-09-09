@@ -14,7 +14,10 @@ export function normalizeBadgeColor(raw: string | null | undefined): string {
   return value.toLowerCase();
 }
 
-export function legacyBadgeFields(badge: ProductBadge, discountPercent: number | null) {
+export function legacyBadgeFields(
+  badge: ProductBadge,
+  discountPercent: number | null,
+) {
   if (badge === ProductBadge.HIT) {
     return { badgeLabel: 'Хит', badgeColor: '#5fa88a' };
   }
@@ -36,7 +39,9 @@ export function resolveBadgeWrite(input: {
   badge?: ProductBadge | null;
   discountPercent?: number | null;
 }) {
-  let badgeLabel = String(input.badgeLabel ?? '').trim().slice(0, 32);
+  let badgeLabel = String(input.badgeLabel ?? '')
+    .trim()
+    .slice(0, 32);
   let badgeColor = normalizeBadgeColor(input.badgeColor);
   let badge = input.badge ?? ProductBadge.NONE;
   let discountPercent =

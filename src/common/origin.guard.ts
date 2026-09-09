@@ -6,9 +6,7 @@ import type { NextFunction, Request, Response } from 'express';
  * Safe no-op when neither header is present (same-origin navigations / some clients).
  */
 export function createOriginGuard(allowedOrigins: string[]) {
-  const allowed = new Set(
-    allowedOrigins.map((o) => o.trim()).filter(Boolean),
-  );
+  const allowed = new Set(allowedOrigins.map((o) => o.trim()).filter(Boolean));
 
   return (req: Request, res: Response, next: NextFunction) => {
     const method = req.method.toUpperCase();

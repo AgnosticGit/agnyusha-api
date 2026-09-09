@@ -210,7 +210,9 @@ export class CartService {
     });
     if (!cart) return null;
     if (cart.expiresAt && cart.expiresAt.getTime() < Date.now()) {
-      await this.prisma.cart.delete({ where: { id: cart.id } }).catch(() => undefined);
+      await this.prisma.cart
+        .delete({ where: { id: cart.id } })
+        .catch(() => undefined);
       return null;
     }
     return cart;
@@ -275,10 +277,16 @@ export class CartService {
 
     const combined = new Map<string, number>();
     for (const line of userCart.items) {
-      combined.set(line.variantId, (combined.get(line.variantId) ?? 0) + line.qty);
+      combined.set(
+        line.variantId,
+        (combined.get(line.variantId) ?? 0) + line.qty,
+      );
     }
     for (const line of guest.items) {
-      combined.set(line.variantId, (combined.get(line.variantId) ?? 0) + line.qty);
+      combined.set(
+        line.variantId,
+        (combined.get(line.variantId) ?? 0) + line.qty,
+      );
     }
 
     const raw = [...combined.entries()].map(([variantId, qty]) => ({
@@ -288,7 +296,9 @@ export class CartService {
     const variants = await this.loadVariants(raw.map((r) => r.variantId));
     const { items, adjustments } = this.sanitizeLines(raw, variants);
     await this.persistSanitized(userCart.id, items);
-    await this.prisma.cart.delete({ where: { id: guest.id } }).catch(() => undefined);
+    await this.prisma.cart
+      .delete({ where: { id: guest.id } })
+      .catch(() => undefined);
     if (res) this.clearGuestCookie(res);
 
     return { items, adjustments };
@@ -296,7 +306,9 @@ export class CartService {
 
   async getCartForUser(userId: string): Promise<CartResponse> {
     const cart = await this.ensureUserCart(userId);
-    const variants = await this.loadVariants(cart.items.map((i) => i.variantId));
+    const variants = await this.loadVariants(
+      cart.items.map((i) => i.variantId),
+    );
     const { items, adjustments } = this.sanitizeLines(cart.items, variants);
     if (adjustments.removed.length || adjustments.capped.length) {
       await this.persistSanitized(cart.id, items);
@@ -323,7 +335,9 @@ export class CartService {
       return { items: [], adjustments: emptyAdjustments() };
     }
 
-    const variants = await this.loadVariants(guest.items.map((i) => i.variantId));
+    const variants = await this.loadVariants(
+      guest.items.map((i) => i.variantId),
+    );
     const { items, adjustments } = this.sanitizeLines(guest.items, variants);
     if (adjustments.removed.length || adjustments.capped.length) {
       await this.persistSanitized(guest.id, items);
@@ -350,7 +364,11 @@ export class CartService {
 
     if (opts.userId) {
       if (opts.guestRawToken) {
-        await this.mergeGuestIntoUser(opts.userId, opts.guestRawToken, opts.res);
+        await this.mergeGuestIntoUser(
+          opts.userId,
+          opts.guestRawToken,
+          opts.res,
+        );
       }
       cart = await this.ensureUserCart(opts.userId);
     } else {
@@ -456,7 +474,9 @@ export class CartService {
       if (opts.guestRawToken) {
         const guest = await this.findGuestCart(opts.guestRawToken);
         if (guest) {
-          await this.prisma.cart.delete({ where: { id: guest.id } }).catch(() => undefined);
+          await this.prisma.cart
+            .delete({ where: { id: guest.id } })
+            .catch(() => undefined);
         }
         this.clearGuestCookie(opts.res);
       }

@@ -374,7 +374,7 @@ export class CdekService {
     }>(`/orders/${encodeURIComponent(id)}`, {});
 
     const entity = data.entity;
-    const statuses = Array.isArray(entity?.statuses) ? entity!.statuses! : [];
+    const statuses = Array.isArray(entity?.statuses) ? entity.statuses : [];
     const latest = statuses[0];
     const rawNumber = entity?.cdek_number;
     const cdekNumber =

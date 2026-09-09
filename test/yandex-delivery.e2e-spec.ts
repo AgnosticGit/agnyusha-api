@@ -140,7 +140,9 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
     const ids = (res.body as { id: string }[]).map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(
-      (res.body as { yandexGeoId: number }[]).filter((c) => c.yandexGeoId === 2),
+      (res.body as { yandexGeoId: number }[]).filter(
+        (c) => c.yandexGeoId === 2,
+      ),
     ).toHaveLength(1);
 
     expect(calls.every((c) => c.url.includes('yandex.net'))).toBe(true);
@@ -223,7 +225,8 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
           create: [
             {
               sku: `YANDEX-ORD-${Date.now()}`,
-              weight: '0,8 кг.', weightGrams: 800,
+              weight: '0,8 кг.',
+              weightGrams: 800,
               price: 725,
               stock: 5,
             },

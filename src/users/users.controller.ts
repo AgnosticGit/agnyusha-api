@@ -59,12 +59,7 @@ export class UsersController {
     @Param('id') id: string,
     @Body() body: UpdateUserBanDto,
   ) {
-    return this.users.setBanned(
-      req.user!.id,
-      req.user!.role,
-      id,
-      body.banned,
-    );
+    return this.users.setBanned(req.user!.id, req.user!.role, id, body.banned);
   }
 
   @Delete(':id')

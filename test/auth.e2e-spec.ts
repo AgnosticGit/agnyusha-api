@@ -317,7 +317,9 @@ describe('Auth Google OAuth (e2e)', () => {
     expect(location).toContain('client_id=test-google-client-id');
     expect(location).toContain('state=');
     expect(res.headers['set-cookie']).toBeDefined();
-    expect(String(res.headers['set-cookie'])).toContain('agnyusha_oauth_state=');
+    expect(String(res.headers['set-cookie'])).toContain(
+      'agnyusha_oauth_state=',
+    );
   });
 
   it('returns 503 when Google is not configured', async () => {
@@ -332,7 +334,10 @@ describe('Auth Google OAuth (e2e)', () => {
   });
 
   it('completes Google callback and sets session cookie', async () => {
-    const googleFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const googleFetch = async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
       const url = String(input);
       if (url.includes('oauth2.googleapis.com/token')) {
         return new Response(JSON.stringify({ access_token: 'access-token' }), {
@@ -397,7 +402,9 @@ describe('Auth Google OAuth (e2e)', () => {
     expect(callback.headers.location).toBe('http://localhost:3000/');
     const sessionCookie = String(callback.headers['set-cookie'] ?? '');
     expect(sessionCookie).toContain('agnyusha_session=');
-    expect(sessionCookie).toMatch(/agnyusha_oauth_state=;.*Expires=Thu, 01 Jan 1970/);
+    expect(sessionCookie).toMatch(
+      /agnyusha_oauth_state=;.*Expires=Thu, 01 Jan 1970/,
+    );
 
     const me = await request(app.getHttpServer())
       .get('/api/auth/me')
@@ -409,7 +416,10 @@ describe('Auth Google OAuth (e2e)', () => {
 
   it('completes Google callback with plus-containing auth code', async () => {
     let receivedCode = '';
-    const googleFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const googleFetch = async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
       const url = String(input);
       if (url.includes('oauth2.googleapis.com/token')) {
         const body = String(init?.body ?? '');

@@ -16,10 +16,7 @@ import type { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
 import { isInventoryEnabled } from '../common/inventory';
 import { resolveWeightGrams } from '../common/weight';
 import { resolvePublicWebUrl } from '../common/web-origin';
-import {
-  formatPersonName,
-  normalizeEmail,
-} from '../common/person-name';
+import { formatPersonName, normalizeEmail } from '../common/person-name';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
 
@@ -180,9 +177,7 @@ export class OrdersService {
       throw new BadRequestException('Сессия недействительна — войдите снова');
     }
 
-    const email = sessionUser
-      ? sessionUser.email
-      : normalizeEmail(dto.email);
+    const email = sessionUser ? sessionUser.email : normalizeEmail(dto.email);
     if (!email || !email.includes('@')) {
       throw new BadRequestException('Укажите корректный email');
     }
@@ -622,9 +617,7 @@ export class OrdersService {
     });
     if (!existing) throw new NotFoundException('Заказ не найден');
     if (existing.paidAt || existing.status !== OrderStatus.NEW) {
-      throw new BadRequestException(
-        'Отменить можно только неоплаченный заказ',
-      );
+      throw new BadRequestException('Отменить можно только неоплаченный заказ');
     }
 
     const order = await this.prisma.$transaction(async (tx) => {

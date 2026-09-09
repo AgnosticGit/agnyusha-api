@@ -1,11 +1,14 @@
 ---
-description: Always write integration tests by default; skip only when the user says not to
+description: Write integration and unit tests by default; skip only when the user says not to
 alwaysApply: true
 ---
 
 # Testing Policy (Backend)
 
-- Always write integration tests for new features and behavior changes, unless the user explicitly asks not to write tests.
-- When changing existing functionality that already has integration coverage, update those tests so they match the new behavior.
-- When adding a new feature, include integration test coverage as part of the work by default.
-- Before finishing work that includes tests, run the full integration suite — not only the newly added tests.
+- Always write **integration and unit** tests for new features and behavior changes, unless the user explicitly asks not to write tests.
+- Unit tests cover pure helpers and isolated service logic (`*.unit-spec.ts`). Integration tests cover HTTP + DB flows (`*.e2e-spec.ts`).
+- When changing existing functionality that already has coverage, update those tests so they match the new behavior.
+- When adding a new feature, include both layers as part of the work by default: unit for pure/util logic, integration for API behavior.
+- Before finishing work that includes tests:
+  - Run unit tests with `npm run test:unit`.
+  - Run the full integration suite with `npm run test:integration` — not only the newly added tests.

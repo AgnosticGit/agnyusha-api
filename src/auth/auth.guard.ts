@@ -32,9 +32,7 @@ async function loadOptionalUser(
   auth: AuthService,
   req: AuthedRequest,
 ): Promise<AuthUser | null> {
-  const user = await auth.getUserBySessionToken(
-    req.cookies?.[SESSION_COOKIE],
-  );
+  const user = await auth.getUserBySessionToken(req.cookies?.[SESSION_COOKIE]);
   if (user) req.user = user;
   return user;
 }

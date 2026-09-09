@@ -103,9 +103,9 @@ describe('Cities + CDEK (e2e, mocked CDEK)', () => {
     );
 
     expect(calls.some((c) => c.url.includes('/oauth/token'))).toBe(true);
-    expect(
-      calls.some((c) => c.url.includes('/location/suggest/cities')),
-    ).toBe(true);
+    expect(calls.some((c) => c.url.includes('/location/suggest/cities'))).toBe(
+      true,
+    );
   });
 
   it('reuses cached OAuth token on the second CDEK call', async () => {
