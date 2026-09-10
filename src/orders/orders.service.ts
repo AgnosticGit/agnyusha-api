@@ -10,7 +10,7 @@ import { DeliveryMethodCode, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentsService } from '../payments/payments.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
-import { CdekService } from '../cdek/cdek.service';
+import { CdekService, cdekTrackingUrl } from '../cdek/cdek.service';
 import { PochtaService, pochtaTrackingUrl } from '../pochta/pochta.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import type { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
@@ -39,10 +39,6 @@ const FINAL_DELIVERY_STATUS_CODES = new Set([
   'SORTING_CENTER_CANCELLED',
   'DELIVERY_TRACKING_FINISHED',
 ]);
-
-function cdekTrackingUrl(trackNumber: string) {
-  return `https://www.cdek.ru/ru/tracking?order_id=${encodeURIComponent(trackNumber)}`;
-}
 
 type ResolvedLine = {
   productId: string;

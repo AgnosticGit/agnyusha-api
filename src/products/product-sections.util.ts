@@ -21,16 +21,3 @@ export function normalizeProductSections(raw: unknown): ProductSection[] {
   }
   return out;
 }
-
-/** Build sections from legacy description/ingredients fields (migration helper). */
-export function sectionsFromLegacyFields(
-  description?: string | null,
-  ingredients?: string | null,
-): ProductSection[] {
-  const sections: ProductSection[] = [];
-  const desc = String(description ?? '').trim();
-  const ing = String(ingredients ?? '').trim();
-  if (desc) sections.push({ title: 'Описание', body: sanitizeProductHtml(desc) });
-  if (ing) sections.push({ title: 'Состав', body: sanitizeProductHtml(ing) });
-  return sections;
-}

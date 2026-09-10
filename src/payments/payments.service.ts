@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { DeliveryMethodCode, OrderStatus } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { CdekService } from '../cdek/cdek.service';
+import { CdekService, cdekTrackingUrl } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { PochtaService, pochtaTrackingUrl } from '../pochta/pochta.service';
 import { SlidingWindowRateLimiter } from '../common/rate-limit';
@@ -20,10 +20,6 @@ import { resolvePublicWebUrl } from '../common/web-origin';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
 import { parseOzonNotification } from './ozon-notification.util';
-
-function cdekTrackingUrl(trackNumber: string) {
-  return `https://www.cdek.ru/ru/tracking?order_id=${encodeURIComponent(trackNumber)}`;
-}
 
 export type OzonPaymentLine = {
   extId: string;

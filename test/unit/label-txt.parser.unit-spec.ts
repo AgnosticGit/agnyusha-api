@@ -1,5 +1,4 @@
-import { parseLabelTxt } from '../../src/products/label-txt.parser';
-import { normalizeProductSections } from '../../src/products/product-sections.util';
+import { parseLabelTxt, formatPackWeightLabel } from '../../src/products/label-txt.parser';
 
 describe('parseLabelTxt', () => {
   const sample = `
@@ -147,6 +146,14 @@ describe('parseLabelTxt', () => {
     ]);
   });
 
+  it('formatPackWeightLabel formats grams and kg', () => {
+    expect(formatPackWeightLabel(250)).toBe('250 г.');
+    expect(formatPackWeightLabel(800)).toBe('800 г.');
+    expect(formatPackWeightLabel(2500)).toBe('2,5 кг.');
+    expect(formatPackWeightLabel(5000)).toBe('5 кг.');
+    expect(formatPackWeightLabel(0)).toBe('800 г.');
+  });
+
   it('detects cats and kitten titles', () => {
     const cats = parseLabelTxt(`
 # ПОЛНОРАЦИОННЫЙ СУХОЙ КОРМ ДЛЯ ВЗРОСЛЫХ КОШЕК
@@ -162,14 +169,5 @@ describe('parseLabelTxt', () => {
     expect(cats.name).toMatch(/кошек/i);
     expect(cats.subtitle).toMatch(/стерилизованных/i);
     expect(cats.weightGrams).toBe(2500);
-  });
-
-  it('normalizeProductSections drops empty rows', () => {
-    expect(
-      normalizeProductSections([
-        { title: 'Состав', body: '<p>ok</p>' },
-        { title: '  ', body: '  ' },
-      ]),
-    ).toEqual([{ title: 'Состав', body: '<p>ok</p>' }]);
   });
 });

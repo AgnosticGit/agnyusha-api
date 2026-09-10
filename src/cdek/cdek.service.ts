@@ -474,3 +474,7 @@ function normalizeWorkTime(value?: string | null) {
     .trim();
   return oneLine || null;
 }
+
+export function cdekTrackingUrl(trackNumber: string) {
+  return `https://www.cdek.ru/ru/tracking?order_id=${encodeURIComponent(trackNumber)}`;
+}
