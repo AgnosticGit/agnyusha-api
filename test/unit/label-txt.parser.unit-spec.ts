@@ -100,20 +100,22 @@ describe('parseLabelTxt', () => {
     expect(parsed.sections[3].body).toContain('<table>');
   });
 
-  it('marks sold-out packs from фасовки block', () => {
+  it('marks sold-out packs from фасовки block and keeps prices', () => {
     const parsed = parseLabelTxt(`
 # ПОЛНОРАЦИОННЫЙ СУХОЙ КОРМ ДЛЯ СОБАК ВСЕХ ПОРОД
 ягнёнок
 
 ## Фасовки
 Товар закончился
-- 800 г
-- 2,5 кг
+- 800 г — 780 ₽
+- 2,5 кг — 2250 ₽
 `.trim());
     expect(parsed.variants).toHaveLength(2);
     expect(parsed.variants.every((v) => v.stock === 0)).toBe(true);
-    expect(parsed.variants[0].weightGrams).toBe(800);
-    expect(parsed.variants[1].weightGrams).toBe(2500);
+    expect(parsed.variants.map((v) => [v.weightGrams, v.price])).toEqual([
+      [800, 780],
+      [2500, 2250],
+    ]);
   });
 
   it('marks a single pack as sold out from line marker', () => {
