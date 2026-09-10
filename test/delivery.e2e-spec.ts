@@ -47,9 +47,11 @@ describe('Delivery methods (e2e)', () => {
     expect(byCode.CDEK).toBe(true);
     expect(byCode.YANDEX).toBe(false);
     expect(byCode.POST).toBe(false);
+    expect(byCode.OZON).toBe(false);
     expect(local.body.map((m: { code: string }) => m.code)).toEqual([
       'CDEK',
       'YANDEX',
+      'OZON',
       'POST',
       'PICKUP',
     ]);

@@ -118,6 +118,7 @@ describe('Health (e2e)', () => {
         'cdek',
         'yandex',
         'pochta',
+        'ozon_delivery',
         'ozon_pay',
         'mail',
         'google_oauth',
@@ -135,6 +136,7 @@ describe('Health (e2e)', () => {
     expect(byId.cdek).toBe('ok');
     expect(byId.yandex).toBe('skipped');
     expect(byId.pochta).toBe('skipped');
+    expect(byId.ozon_delivery).toBe('skipped');
     expect(byId.ozon_pay).toBe('skipped');
     expect(byId.mail).toBe('skipped');
     expect(byId.google_oauth).toBe('ok');

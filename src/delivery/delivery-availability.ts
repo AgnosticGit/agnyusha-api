@@ -34,6 +34,7 @@ export function mapDeliveryAvailability(
     label?: string;
     cdekReady: boolean;
     pochtaReady: boolean;
+    ozonReady: boolean;
     yandexOrderReady: boolean;
     yandexMoscowOnly: boolean;
   },
@@ -84,6 +85,15 @@ export function mapDeliveryAvailability(
         note: input.pochtaReady
           ? 'Выберите отделение Почты России'
           : 'Почта России временно недоступна',
+      };
+    }
+    if (m.code === 'OZON') {
+      return {
+        ...m,
+        available: input.ozonReady,
+        note: input.ozonReady
+          ? 'Выберите пункт выдачи Ozon'
+          : 'Ozon Доставка временно недоступна',
       };
     }
     return {

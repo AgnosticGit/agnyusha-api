@@ -5,6 +5,7 @@ import type { ResendMailService } from '../../src/mail/resend-mail.service';
 import type { PaymentsService } from '../../src/payments/payments.service';
 import type { PrismaService } from '../../src/prisma/prisma.service';
 import type { PochtaService } from '../../src/pochta/pochta.service';
+import type { OzonDeliveryService } from '../../src/ozon-delivery/ozon-delivery.service';
 import type { YandexDeliveryService } from '../../src/yandex/yandex-delivery.service';
 
 type Deps = {
@@ -16,6 +17,11 @@ type Deps = {
     ping: jest.Mock;
   };
   pochta: {
+    isConfigured: jest.Mock;
+    isOrderCreationConfigured: jest.Mock;
+    ping: jest.Mock;
+  };
+  ozonDelivery: {
     isConfigured: jest.Mock;
     isOrderCreationConfigured: jest.Mock;
     ping: jest.Mock;
@@ -48,6 +54,12 @@ function makeService(overrides: Partial<Deps> = {}) {
       ping: jest.fn().mockResolvedValue(undefined),
       ...overrides.pochta,
     },
+    ozonDelivery: {
+      isConfigured: jest.fn().mockReturnValue(false),
+      isOrderCreationConfigured: jest.fn().mockReturnValue(true),
+      ping: jest.fn().mockResolvedValue(undefined),
+      ...overrides.ozonDelivery,
+    },
     payments: {
       isConfigured: jest.fn().mockReturnValue(false),
       ping: jest.fn().mockResolvedValue({ ok: true, message: 'ok' }),
@@ -68,6 +80,7 @@ function makeService(overrides: Partial<Deps> = {}) {
     deps.cdek as unknown as CdekService,
     deps.yandex as unknown as YandexDeliveryService,
     deps.pochta as unknown as PochtaService,
+    deps.ozonDelivery as unknown as OzonDeliveryService,
     deps.payments as unknown as PaymentsService,
     deps.auth as unknown as AuthService,
     deps.mail as unknown as ResendMailService,
@@ -125,6 +138,7 @@ describe('HealthService', () => {
         'cdek',
         'yandex',
         'pochta',
+        'ozon_delivery',
         'ozon_pay',
         'mail',
         'google_oauth',

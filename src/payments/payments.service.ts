@@ -13,6 +13,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CdekService, cdekTrackingUrl } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { PochtaService, pochtaTrackingUrl } from '../pochta/pochta.service';
+import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
+import { ozonTrackingUrl } from '../ozon-delivery/ozon-delivery.util';
 import { SlidingWindowRateLimiter } from '../common/rate-limit';
 import { resolveWeightGrams } from '../common/weight';
 import { formatPersonName } from '../common/person-name';
@@ -48,6 +50,7 @@ export class PaymentsService {
     private readonly yandex: YandexDeliveryService,
     private readonly cdek: CdekService,
     private readonly pochta: PochtaService,
+    private readonly ozonDelivery: OzonDeliveryService,
     @Inject(MAIL_SEND) private readonly sendMail: MailSend,
   ) {}
 
@@ -658,6 +661,52 @@ export class PaymentsService {
       } catch (err) {
         this.logger.error(
           `Pochta create after pay failed for ${order.id}: ${
+            err instanceof Error ? err.message : 'unknown'
+          }`,
+        );
+      }
+    }
+
+    if (
+      order.status !== OrderStatus.CANCELLED &&
+      order.deliveryCode === DeliveryMethodCode.OZON &&
+      order.pickupCode &&
+      !externalDeliveryId &&
+      this.ozonDelivery.isOrderCreationConfigured()
+    ) {
+      try {
+        const ozonOrder = await this.ozonDelivery.createPickupOrder({
+          orderNumber: `agny-pay-${order.id.slice(-12)}`,
+          deliveryPointCode: order.pickupCode,
+          phone: order.phone,
+          recipientName: formatPersonName(order),
+          comment: `Заказ Агнюша · ${order.cityLabel}`,
+          items: order.items.map((item) => ({
+            name: item.productName,
+            wareKey: item.variantId ?? item.id,
+            price: item.price,
+            qty: item.qty,
+            weightGrams: resolveWeightGrams(item.weightGrams, item.weight),
+          })),
+        });
+        externalDeliveryId = ozonOrder.orderNumber;
+        deliveryTrackNumber =
+          ozonOrder.postingNumber ||
+          ozonOrder.orderNumber ||
+          deliveryTrackNumber;
+        deliveryTrackingUrl =
+          ozonOrder.trackingUrl ||
+          ozonTrackingUrl(ozonOrder.orderNumber) ||
+          deliveryTrackingUrl;
+        this.logger.log(
+          `Ozon Delivery shipment after pay for ${order.id}: number=${externalDeliveryId}` +
+            (ozonOrder.postingNumber
+              ? ` posting=${ozonOrder.postingNumber}`
+              : ''),
+        );
+      } catch (err) {
+        this.logger.error(
+          `Ozon Delivery create after pay failed for ${order.id}: ${
             err instanceof Error ? err.message : 'unknown'
           }`,
         );

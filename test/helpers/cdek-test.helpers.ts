@@ -6,6 +6,10 @@ import { CDEK_FETCH, type CdekFetch } from '../../src/cdek/cdek.tokens';
 import { CdekService } from '../../src/cdek/cdek.service';
 import { YANDEX_FETCH, type YandexFetch } from '../../src/yandex/yandex.tokens';
 import { POCHTA_FETCH, type PochtaFetch } from '../../src/pochta/pochta.tokens';
+import {
+  OZON_DELIVERY_FETCH,
+  type OzonDeliveryFetch,
+} from '../../src/ozon-delivery/ozon-delivery.tokens';
 import { MAIL_SEND, type MailSend } from '../../src/mail/mail.tokens';
 import { GOOGLE_FETCH, type GoogleFetch } from '../../src/auth/google.tokens';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -21,6 +25,7 @@ export function applyTestDeliveryEnv(options?: {
   cdek?: 'present' | 'missing';
   yandex?: 'present' | 'missing';
   pochta?: 'present' | 'missing';
+  ozonDelivery?: 'present' | 'missing';
   google?: 'present' | 'missing';
   ozon?: 'present' | 'missing';
   ozonNotificationSecret?: string;
@@ -28,6 +33,7 @@ export function applyTestDeliveryEnv(options?: {
   const cdek = options?.cdek ?? 'present';
   const yandex = options?.yandex ?? 'missing';
   const pochta = options?.pochta ?? 'missing';
+  const ozonDelivery = options?.ozonDelivery ?? 'missing';
   const google = options?.google ?? 'missing';
   const ozon = options?.ozon ?? 'missing';
 
@@ -39,6 +45,8 @@ export function applyTestDeliveryEnv(options?: {
   process.env.CDEK_API_URL = 'https://api.edu.cdek.ru';
   process.env.YANDEX_DELIVERY_API_URL = 'https://b2b.taxi.tst.yandex.net';
   process.env.POCHTA_API_URL = 'https://otpravka-api.pochta.ru';
+  process.env.OZON_DELIVERY_API_URL = 'https://api-delivery.ozon.ru';
+  process.env.OZON_DELIVERY_TOKEN_URL = 'https://xapi.ozon.ru/oauth/token';
   process.env.MAIL_DRIVER = 'resend';
   process.env.MAIL_FROM = 'Агнюша <onboarding@resend.dev>';
   process.env.RESEND_API_KEY = '';
@@ -86,6 +94,17 @@ export function applyTestDeliveryEnv(options?: {
     process.env.POCHTA_ACCESS_TOKEN = '';
     process.env.POCHTA_AUTHORIZATION_KEY = '';
     process.env.POCHTA_FROM_INDEX = '';
+  }
+
+  if (ozonDelivery === 'present') {
+    process.env.OZON_DELIVERY_CLIENT_ID = 'test-ozon-delivery-client';
+    process.env.OZON_DELIVERY_CLIENT_SECRET = 'test-ozon-delivery-secret';
+    process.env.OZON_DELIVERY_SHIPMENT_METHOD_ID = '1001';
+    process.env.OZON_DELIVERY_INDEX_MAX_PAGES = '2';
+  } else {
+    process.env.OZON_DELIVERY_CLIENT_ID = '';
+    process.env.OZON_DELIVERY_CLIENT_SECRET = '';
+    process.env.OZON_DELIVERY_SHIPMENT_METHOD_ID = '';
   }
 
   if (google === 'present') {
@@ -136,6 +155,13 @@ export function createMockPochtaFetch(handler: PochtaFetch) {
   return createMockFetch(/^https:\/\/otpravka-api\.pochta\.ru\//, handler);
 }
 
+export function createMockOzonDeliveryFetch(handler: OzonDeliveryFetch) {
+  return createMockFetch(
+    /^https:\/\/(api-delivery\.ozon\.ru|xapi\.ozon\.ru)\//,
+    handler,
+  );
+}
+
 export function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -147,11 +173,13 @@ export async function createTestApp(options: {
   cdekFetch?: CdekFetch;
   yandexFetch?: YandexFetch;
   pochtaFetch?: PochtaFetch;
+  ozonDeliveryFetch?: OzonDeliveryFetch;
   googleFetch?: GoogleFetch;
   mailSend?: MailSend;
   cdek?: 'present' | 'missing';
   yandex?: 'present' | 'missing';
   pochta?: 'present' | 'missing';
+  ozonDelivery?: 'present' | 'missing';
   google?: 'present' | 'missing';
   ozon?: 'present' | 'missing';
   ozonNotificationSecret?: string;
@@ -160,6 +188,9 @@ export async function createTestApp(options: {
     cdek: options.cdek ?? (options.cdekFetch ? 'present' : 'missing'),
     yandex: options.yandex ?? (options.yandexFetch ? 'present' : 'missing'),
     pochta: options.pochta ?? (options.pochtaFetch ? 'present' : 'missing'),
+    ozonDelivery:
+      options.ozonDelivery ??
+      (options.ozonDeliveryFetch ? 'present' : 'missing'),
     google: options.google ?? (options.googleFetch ? 'present' : 'missing'),
     ozon: options.ozon ?? 'missing',
     ozonNotificationSecret: options.ozonNotificationSecret,
@@ -195,6 +226,18 @@ export async function createTestApp(options: {
     builder = builder.overrideProvider(POCHTA_FETCH).useValue(async () => {
       throw new Error('Pochta fetch should not be called');
     });
+  }
+
+  if (options.ozonDeliveryFetch) {
+    builder = builder
+      .overrideProvider(OZON_DELIVERY_FETCH)
+      .useValue(options.ozonDeliveryFetch);
+  } else {
+    builder = builder
+      .overrideProvider(OZON_DELIVERY_FETCH)
+      .useValue(async () => {
+        throw new Error('Ozon Delivery fetch should not be called');
+      });
   }
 
   if (options.googleFetch) {
@@ -253,17 +296,24 @@ export async function ensureDeliveryMethods(app: INestApplication) {
       isActive: true,
     },
     {
+      code: DeliveryMethodCode.OZON,
+      title: 'Ozon Доставка',
+      description: 'Доставка в пункт выдачи Ozon',
+      sortOrder: 3,
+      isActive: true,
+    },
+    {
       code: DeliveryMethodCode.POST,
       title: 'Почта России',
       description: 'Доставка Почтой России',
-      sortOrder: 3,
+      sortOrder: 4,
       isActive: true,
     },
     {
       code: DeliveryMethodCode.PICKUP,
       title: 'Самовывоз',
       description: 'Из пункта в Ленинградской области',
-      sortOrder: 4,
+      sortOrder: 5,
       isActive: true,
     },
     {

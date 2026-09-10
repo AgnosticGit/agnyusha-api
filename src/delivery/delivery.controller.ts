@@ -3,6 +3,7 @@ import { DeliveryService } from './delivery.service';
 import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { PochtaService } from '../pochta/pochta.service';
+import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
 import {
   DeliveryMethodsQueryDto,
   DeliveryPointsQueryDto,
@@ -17,6 +18,7 @@ export class DeliveryController {
     private readonly cdek: CdekService,
     private readonly yandex: YandexDeliveryService,
     private readonly pochta: PochtaService,
+    private readonly ozonDelivery: OzonDeliveryService,
   ) {}
 
   @Get('delivery-methods')
@@ -40,6 +42,14 @@ export class DeliveryController {
       lat: query.lat,
       lon: query.lon,
       settlement: query.settlement,
+      region: query.region,
+    });
+  }
+
+  @Get('ozon/delivery-points')
+  ozonPoints(@Query() query: PochtaPointsQueryDto) {
+    return this.ozonDelivery.deliveryPoints({
+      settlement: query.settlement || '',
       region: query.region,
     });
   }

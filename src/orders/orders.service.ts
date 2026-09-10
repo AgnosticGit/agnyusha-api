@@ -12,6 +12,8 @@ import { PaymentsService } from '../payments/payments.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { CdekService, cdekTrackingUrl } from '../cdek/cdek.service';
 import { PochtaService, pochtaTrackingUrl } from '../pochta/pochta.service';
+import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
+import { ozonTrackingUrl } from '../ozon-delivery/ozon-delivery.util';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import type { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
 import { isInventoryEnabled } from '../common/inventory';
@@ -60,6 +62,7 @@ export class OrdersService {
     private readonly yandex: YandexDeliveryService,
     private readonly cdek: CdekService,
     private readonly pochta: PochtaService,
+    private readonly ozonDelivery: OzonDeliveryService,
     private readonly payments: PaymentsService,
     private readonly config: ConfigService,
     @Inject(MAIL_SEND) private readonly sendMail: MailSend,
@@ -283,6 +286,17 @@ export class OrdersService {
       }
     }
 
+    if (deliveryCode === DeliveryMethodCode.OZON) {
+      if (!pickupCode) {
+        throw new BadRequestException('Выберите пункт выдачи Ozon');
+      }
+      if (!this.ozonDelivery.isOrderCreationConfigured()) {
+        throw new BadRequestException(
+          'Оформление через Ozon Доставку временно недоступно',
+        );
+      }
+    }
+
     let deliveryTrackNumber: string | null = null;
     let deliveryTrackingUrl: string | null = null;
 
@@ -342,6 +356,32 @@ export class OrdersService {
       deliveryTrackingUrl = pochtaOrder.barcode
         ? pochtaTrackingUrl(pochtaOrder.barcode)
         : null;
+    }
+
+    if (
+      deliveryCode === DeliveryMethodCode.OZON &&
+      pickupCode &&
+      !payEnabled &&
+      this.ozonDelivery.isOrderCreationConfigured()
+    ) {
+      const ozonOrder = await this.ozonDelivery.createPickupOrder({
+        orderNumber: `agny-${Date.now().toString(36)}`,
+        deliveryPointCode: pickupCode,
+        phone,
+        recipientName,
+        comment: `Заказ Агнюша · ${dto.cityLabel}`,
+        items: resolvedItems.map((item) => ({
+          name: item.productName,
+          wareKey: item.variantId,
+          price: item.price,
+          qty: item.qty,
+          weightGrams: item.weightGrams,
+        })),
+      });
+      externalDeliveryId = ozonOrder.orderNumber;
+      deliveryTrackNumber = ozonOrder.postingNumber || ozonOrder.orderNumber;
+      deliveryTrackingUrl =
+        ozonOrder.trackingUrl || ozonTrackingUrl(ozonOrder.orderNumber);
     }
 
     const order = await this.prisma.$transaction(async (tx) => {

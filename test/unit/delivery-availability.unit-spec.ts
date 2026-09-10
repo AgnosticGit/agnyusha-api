@@ -40,12 +40,19 @@ describe('delivery-availability', () => {
       title: 'Почта',
       description: '',
     },
+    {
+      id: '5',
+      code: DeliveryMethodCode.OZON,
+      title: 'Ozon',
+      description: '',
+    },
   ];
 
   it('marks all unavailable without location', () => {
     const rows = mapDeliveryAvailability(methods, {
       cdekReady: true,
       pochtaReady: true,
+      ozonReady: true,
       yandexOrderReady: true,
       yandexMoscowOnly: false,
     });
@@ -58,20 +65,24 @@ describe('delivery-availability', () => {
       label: 'СПб',
       cdekReady: true,
       pochtaReady: true,
+      ozonReady: true,
       yandexOrderReady: true,
       yandexMoscowOnly: false,
     });
     expect(local.find((m) => m.code === 'PICKUP')?.available).toBe(true);
+    expect(local.find((m) => m.code === 'OZON')?.available).toBe(true);
 
     const remote = mapDeliveryAvailability(methods, {
       region: 'Казань',
       label: 'Казань',
       cdekReady: true,
       pochtaReady: true,
+      ozonReady: false,
       yandexOrderReady: true,
       yandexMoscowOnly: false,
     });
     expect(remote.find((m) => m.code === 'PICKUP')?.available).toBe(false);
+    expect(remote.find((m) => m.code === 'OZON')?.available).toBe(false);
   });
 
   it('limits Yandex to Moscow in test contour', () => {
@@ -80,6 +91,7 @@ describe('delivery-availability', () => {
       label: 'Москва',
       cdekReady: true,
       pochtaReady: false,
+      ozonReady: false,
       yandexOrderReady: true,
       yandexMoscowOnly: true,
     });
@@ -91,6 +103,7 @@ describe('delivery-availability', () => {
       label: 'СПб',
       cdekReady: true,
       pochtaReady: true,
+      ozonReady: true,
       yandexOrderReady: true,
       yandexMoscowOnly: true,
     });

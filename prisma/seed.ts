@@ -33,17 +33,24 @@ const deliveryMethods = [
     isActive: true,
   },
   {
+    code: DeliveryMethodCode.OZON,
+    title: 'Ozon Доставка',
+    description: 'Доставка в пункт выдачи Ozon',
+    sortOrder: 3,
+    isActive: true,
+  },
+  {
     code: DeliveryMethodCode.POST,
     title: 'Почта России',
     description: 'Доставка Почтой России',
-    sortOrder: 3,
+    sortOrder: 4,
     isActive: true,
   },
   {
     code: DeliveryMethodCode.PICKUP,
     title: 'Самовывоз',
     description: 'Из пункта в Ленинградской области',
-    sortOrder: 4,
+    sortOrder: 5,
     isActive: true,
   },
   {

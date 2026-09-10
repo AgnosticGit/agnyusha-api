@@ -8,6 +8,7 @@ import { ResendMailService } from '../mail/resend-mail.service';
 import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PochtaService } from '../pochta/pochta.service';
+import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import type {
   HealthCheckItem,
@@ -26,6 +27,7 @@ export class HealthService {
     private readonly cdek: CdekService,
     private readonly yandex: YandexDeliveryService,
     private readonly pochta: PochtaService,
+    private readonly ozonDelivery: OzonDeliveryService,
     private readonly payments: PaymentsService,
     private readonly auth: AuthService,
     private readonly mail: ResendMailService,
@@ -48,6 +50,7 @@ export class HealthService {
       this.checkCdek(),
       this.checkYandex(),
       this.checkPochta(),
+      this.checkOzonDelivery(),
       this.checkOzonPay(),
       this.checkMail(),
       this.checkGoogle(),
@@ -176,6 +179,25 @@ export class HealthService {
           message: orderReady
             ? 'API отвечает'
             : 'Токен есть, но POCHTA_FROM_INDEX не задан',
+        };
+      },
+    );
+  }
+
+  private async checkOzonDelivery(): Promise<HealthCheckItem> {
+    return this.runCheck(
+      'ozon_delivery',
+      'Ozon Доставка',
+      false,
+      this.ozonDelivery.isConfigured(),
+      async () => {
+        await this.ozonDelivery.ping();
+        const orderReady = this.ozonDelivery.isOrderCreationConfigured();
+        return {
+          status: orderReady ? 'ok' : 'degraded',
+          message: orderReady
+            ? 'OAuth токен получен'
+            : 'Клиент есть, но OZON_DELIVERY_SHIPMENT_METHOD_ID не задан',
         };
       },
     );

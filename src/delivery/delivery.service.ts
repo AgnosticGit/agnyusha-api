@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { PochtaService } from '../pochta/pochta.service';
+import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
 import { mapDeliveryAvailability } from './delivery-availability';
 
 @Injectable()
@@ -12,6 +13,7 @@ export class DeliveryService {
     private readonly cdek: CdekService,
     private readonly yandex: YandexDeliveryService,
     private readonly pochta: PochtaService,
+    private readonly ozonDelivery: OzonDeliveryService,
   ) {}
 
   list() {
@@ -34,6 +36,7 @@ export class DeliveryService {
       label,
       cdekReady: this.cdek.isConfigured(),
       pochtaReady: this.pochta.isConfigured(),
+      ozonReady: this.ozonDelivery.isOrderCreationConfigured(),
       yandexOrderReady: this.yandex.isOrderCreationConfigured(),
       yandexMoscowOnly: this.yandex.isTestEnvironment(),
     });

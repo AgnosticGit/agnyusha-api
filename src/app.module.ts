@@ -4,6 +4,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { CdekModule } from './cdek/cdek.module';
 import { YandexModule } from './yandex/yandex.module';
 import { PochtaModule } from './pochta/pochta.module';
+import { OzonDeliveryModule } from './ozon-delivery/ozon-delivery.module';
 import { CitiesModule } from './cities/cities.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { AuthModule } from './auth/auth.module';
@@ -25,6 +26,7 @@ import { HealthModule } from './health/health.module';
     CdekModule,
     YandexModule,
     PochtaModule,
+    OzonDeliveryModule,
     CitiesModule,
     DeliveryModule,
     AuthModule,
