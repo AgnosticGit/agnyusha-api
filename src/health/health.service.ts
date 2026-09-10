@@ -7,6 +7,7 @@ import { withTimeout } from '../common/http-utils';
 import { ResendMailService } from '../mail/resend-mail.service';
 import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PochtaService } from '../pochta/pochta.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import type {
   HealthCheckItem,
@@ -24,6 +25,7 @@ export class HealthService {
     private readonly prisma: PrismaService,
     private readonly cdek: CdekService,
     private readonly yandex: YandexDeliveryService,
+    private readonly pochta: PochtaService,
     private readonly payments: PaymentsService,
     private readonly auth: AuthService,
     private readonly mail: ResendMailService,
@@ -45,6 +47,7 @@ export class HealthService {
       this.checkUploadsDisk(),
       this.checkCdek(),
       this.checkYandex(),
+      this.checkPochta(),
       this.checkOzonPay(),
       this.checkMail(),
       this.checkGoogle(),
@@ -154,6 +157,25 @@ export class HealthService {
           message: orderReady
             ? 'API отвечает'
             : 'Токен есть, но YANDEX_PLATFORM_STATION_ID не задан',
+        };
+      },
+    );
+  }
+
+  private async checkPochta(): Promise<HealthCheckItem> {
+    return this.runCheck(
+      'pochta',
+      'Почта России',
+      false,
+      this.pochta.isConfigured(),
+      async () => {
+        await this.pochta.ping();
+        const orderReady = this.pochta.isOrderCreationConfigured();
+        return {
+          status: orderReady ? 'ok' : 'degraded',
+          message: orderReady
+            ? 'API отвечает'
+            : 'Токен есть, но POCHTA_FROM_INDEX не задан',
         };
       },
     );

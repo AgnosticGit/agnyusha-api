@@ -2,275 +2,194 @@ import {
   PrismaClient,
   DeliveryMethodCode,
   ProductBadge,
-  ProductCategory,
   UserRole,
 } from '@prisma/client';
+import * as fs from 'fs';
+import * as path from 'path';
 import { legacyBadgeFields } from '../src/products/badge.util';
+import { parseLabelTxt } from '../src/products/label-txt.parser';
+import { normalizeProductSections } from '../src/products/product-sections.util';
+import { slugify } from '../src/products/product.util';
 
 const prisma = new PrismaClient();
 
 const ADMIN_EMAIL = 'agnostex@gmail.com';
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 
-const productsSeed = [
+const deliveryMethods = [
   {
-    slug: 'turkey',
-    name: 'Корм для собак из индейки',
-    subtitle: 'Подходит для собак всех пород',
-    image: '/assets/product-turkey.png',
-    category: ProductCategory.DOGS,
-    badge: ProductBadge.HIT,
-    discountPercent: null as number | null,
+    code: DeliveryMethodCode.CDEK,
+    title: 'СДЭК',
+    description: 'Доставка в пункт выдачи СДЭК',
     sortOrder: 1,
-    isPopular: true,
-    nutritionProtein: 28,
-    nutritionFat: 16,
-    nutritionCarbs: 42,
-    variants: [
-      { sku: 'AGN-TURKEY-01', weight: '0,8 кг.', weightGrams: 800, price: 1, stock: 50 },
-      { sku: 'AGN-TURKEY-02', weight: '2,5 кг.', weightGrams: 2500, price: 1, stock: 40 },
-      { sku: 'AGN-TURKEY-03', weight: '5 кг.', weightGrams: 5000, price: 1, stock: 30 },
-      { sku: 'AGN-TURKEY-04', weight: '12 кг.', weightGrams: 12000, price: 1, stock: 20 },
-    ],
-    ingredients:
-      'Мясные ингредиенты 55% (свежее мясо индейки 27%, дегидрированное мясо птицы премиум класса 14%, дегидрированное мясо птицы стандарт 14%) рис, животный жир (источник омега 6), гречка, кукуруза, овсяные хлопья, глютен, пивные дрожжи (источник MOS и витаминов группы B), льняное семя (источник омега 3), сушеный корень цикория (натуральный источник инулина), витаминно-минеральные комплексы, тыква, томат (источник ликопина и минералов), свекла, яблоко, Экстракт Юкки Шидигера, яичный порошок, целлюлоза микрокристаллическая.',
-    description:
-      'Калий, медь, железо, цинк, марганец, йод, селен, глюкозамин, хондроэтин, L-карнитин, розмарин, стабилизирован антиоксидантами (в том числе экстракт розмарина и витамины Е и С), премикс (витаминно-минеральный комплекс). Витамины А, D3, E, B1, B2, B3, B4, B5, B6, B12, BC, H, C, Ca. Рыбий жир, Монокальций фосфат, Гидролизат мясной премиум (ароматизатор).',
+    isActive: true,
   },
   {
-    slug: 'beef',
-    name: 'Корм для собак из говядины',
-    subtitle: 'Подходит для собак всех пород',
-    image: '/assets/product-beef.png',
-    category: ProductCategory.DOGS,
-    badge: ProductBadge.NEW,
-    discountPercent: null,
+    code: DeliveryMethodCode.YANDEX,
+    title: 'Яндекс Доставка',
+    description: 'Доставка в пункт выдачи Яндекс',
     sortOrder: 2,
-    isPopular: true,
-    nutritionProtein: 29,
-    nutritionFat: 17,
-    nutritionCarbs: 40,
-    variants: [
-      { sku: 'AGN-BEEF-01', weight: '0,8 кг.', weightGrams: 800, price: 1, stock: 50 },
-      { sku: 'AGN-BEEF-02', weight: '2,5 кг.', weightGrams: 2500, price: 1, stock: 40 },
-      { sku: 'AGN-BEEF-03', weight: '5 кг.', weightGrams: 5000, price: 1, stock: 30 },
-      { sku: 'AGN-BEEF-04', weight: '12 кг.', weightGrams: 12000, price: 1, stock: 20 },
-    ],
-    ingredients:
-      'Мясные ингредиенты 55% (свежее мясо говядины 27%, дегидрированное мясо говядины 14%, дегидрированное мясо птицы премиум класса 14%) картофель, рис, животный жир (источник омега 6), гречка, кукуруза, овсяные хлопья, глютен, пивные дрожжи (источник MOS и витаминов группы B), льняное семя (источник омега 3), сушеный корень цикория (натуральный источник инулина), целлюлоза микрокристаллическая, тыква, томат (источник ликопина и минералов), свекла, яблоко, Экстракт Юкки Шидигера, яичный порошок, розмарин, стабилизирован антиоксидантами (в том числе экстракт розмарина и витамины Е и С).',
-    description:
-      'Калий, медь, железо, цинк, марганец, йод, селен, термокс, микокарб 23, Премикс (витаминно-минеральный комплекс). Витамины А, Д3, Е, В1, В2, В3, В4, В5, В6, В12, ВС, Н, С, Ca. Рыбий жир, хондроэтин, Глюкозамин, L-Карнитин, Монокальций фосфат, Гидролизат мясной премиум (ароматизатор).',
+    isActive: true,
   },
   {
-    slug: 'fish',
-    name: 'Корм для собак из рыбы',
-    subtitle: 'Подходит для собак всех пород',
-    image: '/assets/product-fish.jpg',
-    category: ProductCategory.DOGS,
-    badge: ProductBadge.SALE,
-    discountPercent: 15,
+    code: DeliveryMethodCode.POST,
+    title: 'Почта России',
+    description: 'Доставка Почтой России',
     sortOrder: 3,
-    isPopular: true,
-    nutritionProtein: 27,
-    nutritionFat: 14,
-    nutritionCarbs: 43,
-    variants: [
-      { sku: 'AGN-FISH-01', weight: '0,8 кг.', weightGrams: 800, price: 1, stock: 50 },
-      { sku: 'AGN-FISH-02', weight: '2,5 кг.', weightGrams: 2500, price: 1, stock: 40 },
-      { sku: 'AGN-FISH-03', weight: '5 кг.', weightGrams: 5000, price: 1, stock: 30 },
-      { sku: 'AGN-FISH-04', weight: '12 кг.', weightGrams: 12000, price: 1, stock: 20 },
-    ],
-    ingredients:
-      'Мясные ингредиенты 55% (свежее мясо белой рыбы 27%, дегидрированная белая рыба 14%, дегидрированное мясо птицы премиум класса 14%) рис, животный жир (источник омега 6), гречка, кукуруза, овсяные хлопья, глютен, пивные дрожжи (источник MOS и витаминов группы B), льняное семя (источник омега 3), сушеный корень цикория (натуральный источник инулина), целлюлоза микрокристаллическая, витаминно-минеральные комплексы, тыква, томат (источник ликопина и минералов), свекла, яблоко, Экстракт Юкки Шидигера, яичный порошок, L-карнитин, розмарин.',
-    description:
-      'Калий, медь, железо, цинк, марганец, йод, селен, глюкозамин, хондроэтин, L-карнитин, стабилизирован антиоксидантами (в том числе экстракт розмарина и витамины Е и С), термокс, микокарб 23, премикс (витаминно-минеральный комплекс). Витамины А, D3, Е, В1, В2, В3, В4, В5, В6, В12, ВС, Н, С, Ca. Рыбий жир, Монокальций фосфат, Гидролизат мясной премиум (ароматизатор).',
+    isActive: true,
   },
   {
-    slug: 'cat-fish',
-    name: 'Корм для взрослых кошек с рыбой',
-    subtitle: 'Подходит для стерилизованных кошек и кастрированных котов',
-    image: '/assets/product-cat-fish.jpg',
-    category: ProductCategory.CATS,
-    badge: ProductBadge.HIT,
-    discountPercent: null,
+    code: DeliveryMethodCode.PICKUP,
+    title: 'Самовывоз',
+    description: 'Из пункта в Ленинградской области',
     sortOrder: 4,
-    isPopular: true,
-    nutritionProtein: 36,
-    nutritionFat: 12,
-    nutritionCarbs: 30,
-    variants: [
-      { sku: 'AGN-CATFISH-01', weight: '0,25 кг.', weightGrams: 250, price: 1, stock: 50 },
-      { sku: 'AGN-CATFISH-02', weight: '2,5 кг.', weightGrams: 2500, price: 1, stock: 30 },
-    ],
-    ingredients:
-      'Мясные ингредиенты 53% (свежая белая рыба 23%, дегидрированная рыба 10%, дегидрированная домашняя птица 16%, гидролизат печени 4%) картофель, маисовый протеин, рис, животный жир (источник омега 6), плазма крови, пивные дрожжи (источник MOS и витаминов группы B), льняное семя и рыбий жир (источник омега 3), сушеный корень цикория (натуральный источник инулина), метионин, таурин, витаминно-минеральные комплексы, экстракт Юкки Шидигера, клюква, L-карнитин, розмарин, стабилизирован антиоксидантами (в том числе экстракт розмарина и витамины Е и С), целлюлоза микрокристаллическая.',
-    description: 'Калий, медь, железо, цинк, марганец, йод, селен, таурин, метионин, L-карнитин.',
+    isActive: true,
   },
   {
-    slug: 'kitten',
-    name: 'Корм для котят с индейкой и курицей',
-    subtitle: 'Подходит для котят всех пород',
-    image: '/assets/product-kitten.png',
-    category: ProductCategory.CATS,
-    badge: ProductBadge.NEW,
-    discountPercent: null,
-    sortOrder: 5,
-    isPopular: false,
-    nutritionProtein: 34,
-    nutritionFat: 18,
-    nutritionCarbs: 32,
-    variants: [
-      { sku: 'AGN-KITTEN-01', weight: '0,25 кг.', weightGrams: 250, price: 1, stock: 50 },
-      { sku: 'AGN-KITTEN-02', weight: '0,7 кг.', weightGrams: 700, price: 1, stock: 40 },
-      { sku: 'AGN-KITTEN-03', weight: '2,5 кг.', weightGrams: 2500, price: 1, stock: 30 },
-    ],
-    ingredients:
-      'Мясные ингредиенты 46% (дегидрированная индейка 26%, свежее мясо курицы 20%) кукуруза, рис, кукурузный белок, животный жир (источник омега 6), гидролизат печени, гороховый протеин, плазма крови, пивные дрожжи (источник MOS и витаминов группы B), льняное семя и рыбий жир (источник омега 3), сушеная мякоть свеклы, сушеный корень цикория (натуральный источник инулина), метионин, таурин, витаминно-минеральные комплексы, экстракт Юкки Шидигера, L-карнитин, розмарин, стабилизирован антиоксидантами (в том числе экстракт розмарина и витамины Е и С), целлюлоза микрокристаллическая.',
-    description: 'Калий, медь, железо, цинк, марганец, йод, селен, таурин, метионин, L-карнитин.',
+    code: DeliveryMethodCode.COURIER,
+    title: 'Курьер',
+    description: 'Доставка курьером по адресу',
+      sortOrder: 99,
+    isActive: false,
   },
 ];
 
-async function seedDeliveryMethods() {
-  const methods = [
-    {
-      code: DeliveryMethodCode.CDEK,
-      title: 'СДЭК',
-      description: 'Доставка в пункт выдачи СДЭК',
-      sortOrder: 1,
-      isActive: true,
-    },
-    {
-      code: DeliveryMethodCode.YANDEX,
-      title: 'Яндекс Доставка',
-      description: 'Доставка в пункт выдачи Яндекс',
-      sortOrder: 2,
-      isActive: true,
-    },
-    {
-      code: DeliveryMethodCode.POST,
-      title: 'Почта России',
-      description: 'Доставка Почтой России',
-      sortOrder: 3,
-      isActive: true,
-    },
-    {
-      code: DeliveryMethodCode.PICKUP,
-      title: 'Самовывоз',
-      description: 'Из пункта в Ленинградской области',
-      sortOrder: 4,
-      isActive: true,
-    },
-    // Kept in DB for historical orders; hidden from checkout.
-    {
-      code: DeliveryMethodCode.COURIER,
-      title: 'Курьер',
-      description: 'Доставка курьером по адресу',
-      sortOrder: 99,
-      isActive: false,
-    },
-  ];
+/** Full wipe — seed recreates catalog, delivery, admin. */
+async function clearDatabase() {
+  await prisma.cartItem.deleteMany();
+  await prisma.cart.deleteMany();
+  await prisma.orderItem.deleteMany();
+  await prisma.order.deleteMany();
+  await prisma.productVariant.deleteMany();
+  await prisma.product.deleteMany();
+  await prisma.session.deleteMany();
+  await prisma.magicLink.deleteMany();
+  await prisma.userPermission.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.deliveryMethod.deleteMany();
+  console.log('Database cleared');
+}
 
-  for (const method of methods) {
-    await prisma.deliveryMethod.upsert({
-      where: { code: method.code },
-      create: method,
-      update: {
-        title: method.title,
-        description: method.description,
-        sortOrder: method.sortOrder,
-        isActive: method.isActive,
-      },
-    });
+async function seedDeliveryMethods() {
+  for (const method of deliveryMethods) {
+    await prisma.deliveryMethod.create({ data: method });
   }
   console.log(
-    `Delivery methods: ${methods.filter((m) => m.isActive).length} active`,
+    `Delivery methods: ${deliveryMethods.filter((m) => m.isActive).length} active`,
   );
 }
 
 async function seedAdmin() {
-  await prisma.user.upsert({
-    where: { email: ADMIN_EMAIL },
-    create: { email: ADMIN_EMAIL, role: UserRole.ADMIN },
-    update: { role: UserRole.ADMIN },
+  await prisma.user.create({
+    data: { email: ADMIN_EMAIL, role: UserRole.ADMIN },
   });
   console.log(`Admin: ${ADMIN_EMAIL}`);
 }
 
-async function seedProducts() {
-  for (const p of productsSeed) {
-    const badge = legacyBadgeFields(p.badge, p.discountPercent);
-    const { variants, ...rest } = p;
-    const productData = {
-      ...rest,
-      images: [p.image],
-      badgeLabel: badge.badgeLabel,
-      badgeColor: badge.badgeColor,
-    };
+function ensureUploadsDir() {
+  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
 
-    const product = await prisma.product.upsert({
-      where: { slug: p.slug },
-      create: productData,
-      update: {
-        name: p.name,
-        subtitle: p.subtitle,
-        image: p.image,
-        images: [p.image],
-        category: p.category,
-        badge: p.badge,
+function copySeedImage(srcName: string, destName: string): string {
+  const src = path.join(DATA_DIR, srcName);
+  if (!fs.existsSync(src)) {
+    throw new Error(`Missing seed image: ${src}`);
+  }
+  const dest = path.join(UPLOADS_DIR, destName);
+  fs.copyFileSync(src, dest);
+  return `/uploads/${destName}`;
+}
+
+function discoverLabelIds(): string[] {
+  if (!fs.existsSync(DATA_DIR)) {
+    throw new Error(`Seed data folder not found: ${DATA_DIR}`);
+  }
+  const files = fs.readdirSync(DATA_DIR);
+  const ids = new Set<string>();
+  for (const file of files) {
+    const m = /^(\d+)b\.txt$/i.exec(file);
+    if (m) ids.add(m[1]);
+  }
+  return [...ids].sort((a, b) => Number(a) - Number(b));
+}
+
+function skuFor(id: string, grams: number): string {
+  return `AGN-${id}-${grams}`.toUpperCase();
+}
+
+async function seedProductsFromData() {
+  ensureUploadsDir();
+  const ids = discoverLabelIds();
+  if (!ids.length) {
+    throw new Error(`No *b.txt label files in ${DATA_DIR}`);
+  }
+
+  let sortOrder = 1;
+  for (const id of ids) {
+    const txtPath = path.join(DATA_DIR, `${id}b.txt`);
+    const markdown = fs.readFileSync(txtPath, 'utf8');
+    const parsed = parseLabelTxt(markdown);
+    const sections = normalizeProductSections(parsed.sections);
+
+    const cover = copySeedImage(`${id}.png`, `seed-${id}.png`);
+    const labelImg = copySeedImage(`${id}b.png`, `seed-${id}b.png`);
+    const images = [cover, labelImg];
+
+    const badgeEnum =
+      sortOrder === 1
+        ? ProductBadge.HIT
+        : sortOrder === 2
+          ? ProductBadge.NEW
+          : ProductBadge.NONE;
+    const badge = legacyBadgeFields(badgeEnum, null);
+
+    const slugBase = slugify(parsed.name);
+    const slug = `${slugBase}-${id}`;
+
+    await prisma.product.create({
+      data: {
+        slug,
+        name: parsed.name,
+        subtitle: parsed.subtitle,
+        image: cover,
+        images,
+        category: parsed.category,
+        badge: badgeEnum,
         badgeLabel: badge.badgeLabel,
         badgeColor: badge.badgeColor,
-        discountPercent: p.discountPercent,
-        ingredients: p.ingredients,
-        description: p.description,
-        nutritionProtein: p.nutritionProtein,
-        nutritionFat: p.nutritionFat,
-        nutritionCarbs: p.nutritionCarbs,
-        sortOrder: p.sortOrder,
+        discountPercent: null,
+        sections,
+        nutritionProtein: parsed.nutritionProtein,
+        nutritionFat: parsed.nutritionFat,
+        nutritionCarbs: null,
+        sortOrder,
         isActive: true,
-        isPopular: p.isPopular,
+        isPopular: sortOrder <= 4,
+        variants: {
+          create: parsed.variants.map((v, index) => ({
+            sku: skuFor(id, v.weightGrams),
+            weight: v.weightLabel,
+            weightGrams: v.weightGrams,
+            price: v.price,
+            stock: v.stock,
+            sortOrder: index,
+          })),
+        },
       },
     });
 
-    for (const [index, v] of variants.entries()) {
-      const existing = await prisma.productVariant.findFirst({
-        where: {
-          OR: [{ sku: v.sku }, { productId: product.id, weight: v.weight }],
-        },
-      });
-      if (existing) {
-        await prisma.productVariant.update({
-          where: { id: existing.id },
-          data: {
-            sku: v.sku,
-            weight: v.weight,
-            weightGrams: v.weightGrams,
-            price: v.price,
-            stock: v.stock,
-            sortOrder: index,
-            productId: product.id,
-          },
-        });
-      } else {
-        await prisma.productVariant.create({
-          data: {
-            productId: product.id,
-            sku: v.sku,
-            weight: v.weight,
-            weightGrams: v.weightGrams,
-            price: v.price,
-            stock: v.stock,
-            sortOrder: index,
-          },
-        });
-      }
-    }
+    console.log(`Product ${id}: ${parsed.name} (${parsed.category})`);
+    sortOrder += 1;
   }
-  console.log(`Products: ${productsSeed.length}`);
+  console.log(`Products: ${ids.length} from data/`);
 }
 
 async function main() {
+  await clearDatabase();
   await seedDeliveryMethods();
   await seedAdmin();
-  await seedProducts();
+  await seedProductsFromData();
 }
 
 main()

@@ -4,12 +4,18 @@ import type { CdekService } from '../../src/cdek/cdek.service';
 import type { ResendMailService } from '../../src/mail/resend-mail.service';
 import type { PaymentsService } from '../../src/payments/payments.service';
 import type { PrismaService } from '../../src/prisma/prisma.service';
+import type { PochtaService } from '../../src/pochta/pochta.service';
 import type { YandexDeliveryService } from '../../src/yandex/yandex-delivery.service';
 
 type Deps = {
   prisma: { $queryRaw: jest.Mock };
   cdek: { isConfigured: jest.Mock; ping: jest.Mock };
   yandex: {
+    isConfigured: jest.Mock;
+    isOrderCreationConfigured: jest.Mock;
+    ping: jest.Mock;
+  };
+  pochta: {
     isConfigured: jest.Mock;
     isOrderCreationConfigured: jest.Mock;
     ping: jest.Mock;
@@ -36,6 +42,12 @@ function makeService(overrides: Partial<Deps> = {}) {
       ping: jest.fn().mockResolvedValue(undefined),
       ...overrides.yandex,
     },
+    pochta: {
+      isConfigured: jest.fn().mockReturnValue(false),
+      isOrderCreationConfigured: jest.fn().mockReturnValue(true),
+      ping: jest.fn().mockResolvedValue(undefined),
+      ...overrides.pochta,
+    },
     payments: {
       isConfigured: jest.fn().mockReturnValue(false),
       ping: jest.fn().mockResolvedValue({ ok: true, message: 'ok' }),
@@ -55,6 +67,7 @@ function makeService(overrides: Partial<Deps> = {}) {
     deps.prisma as unknown as PrismaService,
     deps.cdek as unknown as CdekService,
     deps.yandex as unknown as YandexDeliveryService,
+    deps.pochta as unknown as PochtaService,
     deps.payments as unknown as PaymentsService,
     deps.auth as unknown as AuthService,
     deps.mail as unknown as ResendMailService,
@@ -111,12 +124,15 @@ describe('HealthService', () => {
         'uploads',
         'cdek',
         'yandex',
+        'pochta',
         'ozon_pay',
         'mail',
         'google_oauth',
       ]);
       expect(
-        report.checks.filter((c) => c.configured === false).every((c) => c.status === 'skipped'),
+        report.checks
+          .filter((c) => c.configured === false)
+          .every((c) => c.status === 'skipped'),
       ).toBe(true);
     });
 
@@ -159,6 +175,23 @@ describe('HealthService', () => {
       expect(report.checks.find((c) => c.id === 'yandex')).toMatchObject({
         status: 'degraded',
         configured: true,
+      });
+    });
+
+    it('marks pochta degraded when FROM_INDEX is missing', async () => {
+      const { service } = makeService({
+        pochta: {
+          isConfigured: jest.fn().mockReturnValue(true),
+          isOrderCreationConfigured: jest.fn().mockReturnValue(false),
+          ping: jest.fn().mockResolvedValue(undefined),
+        },
+      });
+      const report = await service.fullReport();
+      expect(report.status).toBe('degraded');
+      expect(report.checks.find((c) => c.id === 'pochta')).toMatchObject({
+        status: 'degraded',
+        configured: true,
+        message: expect.stringContaining('POCHTA_FROM_INDEX'),
       });
     });
   });

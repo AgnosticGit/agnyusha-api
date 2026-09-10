@@ -219,8 +219,7 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
         name: 'Корм тест Yandex',
         image: '/assets/product-turkey.png',
         category: 'DOGS',
-        ingredients: 't',
-        description: 't',
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
         variants: {
           create: [
             {

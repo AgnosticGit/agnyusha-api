@@ -159,8 +159,7 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
         name: 'Корм тест Почта',
         image: '/assets/product-turkey.png',
         category: 'DOGS',
-        ingredients: 't',
-        description: 't',
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
         variants: {
           create: [
             {

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-/** Keys that must match `.env.${NODE_ENV}` even if the shell/IDE already injected `.env`. */
+/** Keys that must match `.env.${NODE_ENV}` even if the shell/IDE already injected another env file. */
 const DELIVERY_ENV_KEYS = [
   'CDEK_API_URL',
   'CDEK_CLIENT_ID',
@@ -41,8 +41,9 @@ function parseEnvFile(content: string): Record<string, string> {
 
 /**
  * Nest ConfigModule does not override keys already present in `process.env`.
- * Local terminals often preload `.env` (edu CDEK), so `NODE_ENV=production`
- * still talks to api.edu.cdek.ru. Force delivery keys from `.env.${NODE_ENV}`.
+ * Local terminals often preload delivery secrets from another env file, so
+ * `NODE_ENV=production` still talks to api.edu.cdek.ru. Force delivery keys
+ * from `.env.${NODE_ENV}`.
  */
 export function syncDeliveryEnvWithNodeEnv(
   cwd = process.cwd(),

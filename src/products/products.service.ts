@@ -15,8 +15,9 @@ import {
   slugify,
   type ProductVariantDto,
 } from './product.util';
-import { sanitizeProductHtml } from './sanitize-description';
 import { resolveBadgeRead, resolveBadgeWrite } from './badge.util';
+import { normalizeProductSections } from './product-sections.util';
+import { Prisma } from '@prisma/client';
 
 type ProductWithVariants = Product & { variants: ProductVariant[] };
 
@@ -57,8 +58,7 @@ export class ProductsService {
       badgeLabel: badge.badgeLabel,
       badgeColor: badge.badgeColor,
       discountPercent: product.discountPercent,
-      ingredients: sanitizeProductHtml(product.ingredients),
-      description: sanitizeProductHtml(product.description),
+      sections: normalizeProductSections(product.sections),
       nutritionProtein: product.nutritionProtein,
       nutritionFat: product.nutritionFat,
       nutritionCarbs: product.nutritionCarbs,
@@ -275,8 +275,7 @@ export class ProductsService {
         badgeLabel: badgeFields.badgeLabel,
         badgeColor: badgeFields.badgeColor,
         discountPercent: badgeFields.discountPercent,
-        ingredients: sanitizeProductHtml(dto.ingredients),
-        description: sanitizeProductHtml(dto.description),
+        sections: normalizeProductSections(dto.sections ?? []) as Prisma.InputJsonValue,
         nutritionProtein: dto.nutritionProtein ?? null,
         nutritionFat: dto.nutritionFat ?? null,
         nutritionCarbs: dto.nutritionCarbs ?? null,
@@ -369,8 +368,7 @@ export class ProductsService {
           badgeLabel: badgeFields.badgeLabel,
           badgeColor: badgeFields.badgeColor,
           discountPercent: badgeFields.discountPercent,
-          ingredients: sanitizeProductHtml(dto.ingredients),
-          description: sanitizeProductHtml(dto.description),
+          sections: normalizeProductSections(dto.sections ?? []) as Prisma.InputJsonValue,
           nutritionProtein: dto.nutritionProtein ?? null,
           nutritionFat: dto.nutritionFat ?? null,
           nutritionCarbs: dto.nutritionCarbs ?? null,

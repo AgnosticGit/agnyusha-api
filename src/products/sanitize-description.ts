@@ -11,10 +11,17 @@ const tags: Record<string, string[]> = {
   s: [],
   h2: ['style'],
   h3: ['style'],
+  h4: ['style'],
   ul: [],
   ol: [],
   li: [],
   span: ['style'],
+  table: [],
+  thead: [],
+  tbody: [],
+  tr: [],
+  th: [],
+  td: [],
 };
 
 const FONT_SIZE_RE = /^\d+(?:\.\d+)?(?:px|rem|em)$/;

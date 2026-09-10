@@ -46,6 +46,16 @@ export class ProductVariantInput {
   sortOrder?: number;
 }
 
+export class ProductSectionInput {
+  @IsString()
+  @MinLength(1)
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  body?: string;
+}
+
 export class UpsertProductDto {
   @IsOptional()
   @IsString()
@@ -89,12 +99,10 @@ export class UpsertProductDto {
   discountPercent?: number | null;
 
   @IsOptional()
-  @IsString()
-  ingredients?: string;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductSectionInput)
+  sections?: ProductSectionInput[];
 
   @IsOptional()
   @Type(() => Number)

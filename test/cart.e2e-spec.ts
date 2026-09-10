@@ -103,8 +103,7 @@ describe('Cart guest persist & merge (e2e)', () => {
             stock: 3,
           },
         ],
-        ingredients: 't',
-        description: 't',
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
       })
       .expect(201);
 
@@ -127,8 +126,7 @@ describe('Cart guest persist & merge (e2e)', () => {
             stock: 8,
           },
         ],
-        ingredients: 't',
-        description: 't',
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
       })
       .expect(201);
 

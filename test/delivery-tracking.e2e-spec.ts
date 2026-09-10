@@ -40,8 +40,7 @@ describe('Delivery tracking poll (e2e)', () => {
         name: 'Корм трек',
         image: '/assets/product-turkey.png',
         category: 'DOGS',
-        ingredients: 't',
-        description: 't',
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
         variants: {
           create: [
             {

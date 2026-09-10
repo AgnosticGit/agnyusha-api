@@ -1,0 +1,34 @@
+---
+description: Any checkable integration/service must appear in admin health
+alwaysApply: true
+---
+
+# Health checks for status-capable features
+
+If you add or enable a feature whose readiness can be observed (API credentials, external ping, disk, DB, payment/delivery provider, OAuth, mail), **add it to system health** in the same change.
+
+## Required
+
+1. **`HealthService.fullReport`** — new `checkX()` with stable `id`, human `name`, `critical` only for boot-blocking deps.
+2. **Probe** — prefer real lightweight ping (`isConfigured` → skip; else call provider). Use `degraded` when partially configured (e.g. token without warehouse/index).
+3. **Tests** — update `test/unit/health.service.unit-spec.ts` and `test/health.e2e-spec.ts` for the new check id.
+4. Do not leave “we’ll add health later” for integrations that already have `isConfigured` / `ping`.
+
+## Examples
+
+- Delivery (CDEK, Yandex, Pochta), Ozon Pay, Google OAuth, Resend mail → health checks.
+- Pure UI copy or local-only helpers with no external/config status → no health check.
+
+```typescript
+// ✅ GOOD — new provider ships with health
+private async checkPochta(): Promise<HealthCheckItem> {
+  return this.runCheck('pochta', 'Почта России', false, this.pochta.isConfigured(), async () => {
+    await this.pochta.ping();
+    const orderReady = this.pochta.isOrderCreationConfigured();
+    return {
+      status: orderReady ? 'ok' : 'degraded',
+      message: orderReady ? 'API отвечает' : 'Токен есть, но POCHTA_FROM_INDEX не задан',
+    };
+  });
+}
+```

@@ -48,16 +48,40 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(res.body.length).toBeGreaterThan(0);
   });
 
-  it('returns product by slug', async () => {
-    const list = await request(app.getHttpServer())
-      .get('/api/products')
-      .expect(200);
-    const slug = list.body[0].slug as string;
+  it('returns product by slug with sections', async () => {
+    const admin = await loginAs(app, 'sections-slug@example.com', UserRole.ADMIN);
+    const created = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Секции тест',
+        category: 'DOGS',
+        variants: [
+          {
+            sku: `SEC-SLUG-${Date.now()}`,
+            weight: '1 кг.',
+            weightGrams: 1000,
+            price: 100,
+            stock: 5,
+          },
+        ],
+        sections: [
+          { title: 'Состав', body: '<p>Мясо</p>' },
+          { title: 'Польза', body: '<p>Витамины</p>' },
+        ],
+      })
+      .expect(201);
+
+    expect(created.body.sections).toHaveLength(2);
+
     const res = await request(app.getHttpServer())
-      .get(`/api/products/${slug}`)
+      .get(`/api/products/${created.body.slug}`)
       .expect(200);
-    expect(res.body.slug).toBe(slug);
-    expect(res.body.ingredients).toBeTruthy();
+    expect(res.body.slug).toBe(created.body.slug);
+    expect(res.body.sections).toEqual([
+      { title: 'Состав', body: '<p>Мясо</p>' },
+      { title: 'Польза', body: '<p>Витамины</p>' },
+    ]);
   });
 
   it('returns product by double-encoded slug', async () => {
@@ -69,16 +93,14 @@ describe('Catalog admin & orders (e2e)', () => {
     ) as { slug: string } | undefined;
     const target =
       cyrillic ??
-      (list.body.find((p: { slug: string }) => p.slug === 'turkey') as {
-        slug: string;
-      });
+      (list.body[0] as { slug: string } | undefined);
     expect(target).toBeTruthy();
 
-    const doubleEncoded = encodeURIComponent(encodeURIComponent(target.slug));
+    const doubleEncoded = encodeURIComponent(encodeURIComponent(target!.slug));
     const res = await request(app.getHttpServer())
       .get(`/api/products/${doubleEncoded}`)
       .expect(200);
-    expect(res.body.slug).toBe(target.slug);
+    expect(res.body.slug).toBe(target!.slug);
   });
 
   it('admin can create product and user can place order', async () => {
@@ -100,8 +122,7 @@ describe('Catalog admin & orders (e2e)', () => {
             stock: 10,
           },
         ],
-        ingredients: 'test',
-        description: 'test',
+        sections: [{ title: 'Состав', body: 'test' }],
         isPopular: true,
       })
       .expect(201);
@@ -130,14 +151,20 @@ describe('Catalog admin & orders (e2e)', () => {
             stock: 5,
           },
         ],
-        description:
-          '<p>Безопасный <strong>текст</strong></p><script>alert(1)</script><img src=x onerror=alert(1)>',
+        sections: [
+          {
+            title: 'Описание',
+            body: '<p>Безопасный <strong>текст</strong></p><script>alert(1)</script><img src=x onerror=alert(1)>',
+          },
+        ],
       })
       .expect(201);
 
-    expect(create.body.description).toBe('<p>test</p>');
-    expect(xss.body.description).toContain('<strong>текст</strong>');
-    expect(xss.body.description).not.toMatch(/script|onerror|img/i);
+    expect(create.body.sections).toEqual([
+      { title: 'Состав', body: '<p>test</p>' },
+    ]);
+    expect(xss.body.sections[0].body).toContain('<strong>текст</strong>');
+    expect(xss.body.sections[0].body).not.toMatch(/script|onerror|img/i);
 
     const customBadge = await request(app.getHttpServer())
       .post('/api/admin/products')
@@ -156,15 +183,20 @@ describe('Catalog admin & orders (e2e)', () => {
         ],
         badgeLabel: 'Акция',
         badgeColor: '#c45c26',
-        ingredients: '<p>Рис</p><script>alert(1)</script>',
-        description: '<p>Ок</p>',
+        sections: [
+          { title: 'Описание', body: '<p>Ок</p>' },
+          { title: 'Состав', body: '<p>Рис</p><script>alert(1)</script>' },
+        ],
       })
       .expect(201);
 
     expect(customBadge.body.badgeLabel).toBe('Акция');
     expect(customBadge.body.badgeColor).toBe('#c45c26');
-    expect(customBadge.body.ingredients).toContain('<p>Рис</p>');
-    expect(customBadge.body.ingredients).not.toMatch(/script/i);
+    const composition = customBadge.body.sections.find(
+      (s: { title: string }) => s.title === 'Состав',
+    );
+    expect(composition.body).toContain('<p>Рис</p>');
+    expect(composition.body).not.toMatch(/script/i);
 
     await request(app.getHttpServer())
       .delete(`/api/admin/products/${customBadge.body.id}`)
@@ -656,8 +688,7 @@ describe('Catalog admin & orders (e2e)', () => {
             stock: 5,
           },
         ],
-        ingredients: 't',
-        description: 't',
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
       })
       .expect(201);
 
@@ -757,8 +788,7 @@ describe('Catalog admin & orders (e2e)', () => {
             stock: 4,
           },
         ],
-        ingredients: 't',
-        description: 't',
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
       })
       .expect(201);
 
