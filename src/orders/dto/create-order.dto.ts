@@ -62,11 +62,6 @@ export class CreateOrderDto {
   @MaxLength(80)
   firstName!: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(80)
-  middleName?: string;
-
   @IsString()
   @MinLength(1)
   contactChannel!: string;

@@ -134,6 +134,10 @@ describe('Health (e2e)', () => {
     expect(byId.database).toBe('ok');
     expect(byId.uploads).toBe('ok');
     expect(byId.cdek).toBe('ok');
+    const cdek = (
+      res.body.checks as Array<{ id: string; message: string | null }>
+    ).find((c) => c.id === 'cdek');
+    expect(cdek?.message).toContain('опрос');
     expect(byId.yandex).toBe('skipped');
     expect(byId.pochta).toBe('skipped');
     expect(byId.ozon_delivery).toBe('skipped');

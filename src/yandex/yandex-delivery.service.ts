@@ -12,6 +12,11 @@ import {
   sanitizeSearchName,
 } from '../common/http-utils';
 import { YANDEX_FETCH, type YandexFetch } from './yandex.tokens';
+import {
+  YandexEntityNotFoundError,
+  isYandexRequestGone,
+  yandexRequestIdFromPath,
+} from './yandex.errors';
 
 type YandexDetectVariant = {
   geo_id: number;
@@ -251,6 +256,9 @@ export class YandexDeliveryService {
       this.logger.error(
         `Yandex ${path} failed with status ${res.status}${detail ? `: ${detail}` : ''}`,
       );
+      if (isYandexRequestGone(path, res.status, detail)) {
+        throw new YandexEntityNotFoundError(yandexRequestIdFromPath(path));
+      }
       if (res.status >= 400 && res.status < 500) {
         throw new BadRequestException(
           'Не удалось оформить доставку Яндекс. Проверьте город и пункт выдачи.',

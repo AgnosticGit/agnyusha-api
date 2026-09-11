@@ -319,7 +319,6 @@ export class PochtaService {
     recipientName: string;
     lastName?: string;
     firstName?: string;
-    middleName?: string;
     comment?: string;
     cityLabel?: string;
     items: Array<{
@@ -370,7 +369,6 @@ export class PochtaService {
       input.firstName?.trim() ||
       input.recipientName.trim().split(/\s+/)[1] ||
       '';
-    const middleName = input.middleName?.trim() || '';
 
     const placeTo =
       office.settlement?.trim() ||
@@ -393,7 +391,6 @@ export class PochtaService {
         'recipient-name': input.recipientName.slice(0, 120) || 'Покупатель',
         surname: surname.slice(0, 50),
         'given-name': givenName.slice(0, 50) || undefined,
-        'middle-name': middleName.slice(0, 50) || undefined,
         'tel-address': phone,
         'postoffice-code': this.fromIndex,
         comment: input.comment?.slice(0, 255) || undefined,

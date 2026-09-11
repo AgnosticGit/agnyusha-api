@@ -147,7 +147,6 @@ export class AuthService {
     phone?: string | null;
     lastName?: string | null;
     firstName?: string | null;
-    middleName?: string | null;
     role: AuthUser['role'];
   }): Promise<AuthUser> {
     return {
@@ -157,7 +156,6 @@ export class AuthService {
       phone: user.phone ?? '',
       lastName: user.lastName ?? '',
       firstName: user.firstName ?? '',
-      middleName: user.middleName ?? '',
       role: user.role,
       permissions: await this.permissionsForUser(user.id),
     };
@@ -438,12 +436,10 @@ export class AuthService {
       phone: string;
       lastName: string;
       firstName: string;
-      middleName?: string;
     },
   ): Promise<AuthUser> {
     const lastName = dto.lastName.trim();
     const firstName = dto.firstName.trim();
-    const middleName = (dto.middleName ?? '').trim();
     const phone = dto.phone.trim();
     if (!lastName || !firstName) {
       throw new BadRequestException('Укажите фамилию и имя');
@@ -457,7 +453,6 @@ export class AuthService {
       data: {
         lastName,
         firstName,
-        middleName,
         phone,
       },
     });

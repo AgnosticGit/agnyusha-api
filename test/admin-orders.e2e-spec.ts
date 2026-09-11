@@ -80,6 +80,9 @@ describe('Admin orders CRM (e2e)', () => {
         cityLabel: 'Москва',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        deliveryTrackNumber: '1234567890',
+        deliveryTrackingUrl:
+          'https://www.cdek.ru/ru/tracking?order_id=1234567890',
         total: variant.price,
         items: {
           create: [
@@ -142,6 +145,9 @@ describe('Admin orders CRM (e2e)', () => {
           id: order.id,
           status: 'NEW',
           customerEmail: 'orders-buyer@example.com',
+          deliveryTracking: expect.objectContaining({
+            trackNumber: '1234567890',
+          }),
         }),
       ]),
     );

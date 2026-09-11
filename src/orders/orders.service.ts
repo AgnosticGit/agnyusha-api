@@ -24,23 +24,11 @@ import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
 import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
 import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
+import { YandexEntityNotFoundError } from '../yandex/yandex.errors';
 import { orderStatusAfterCarrierGone } from './order-status.util';
+import { FINAL_DELIVERY_STATUS_CODES } from './delivery-status.util';
 
 const DELIVERY_SYNC_TTL_MS = 3 * 60 * 1000;
-
-const FINAL_DELIVERY_STATUS_CODES = new Set([
-  'DELIVERED',
-  'NOT_DELIVERED',
-  'REMOVED',
-  'INVALID',
-  'DESTROYED',
-  'DELIVERED_FINISH',
-  'RETURNED_FINISH',
-  'CANCELLED',
-  'CANCELLED_USER',
-  'SORTING_CENTER_CANCELLED',
-  'DELIVERY_TRACKING_FINISHED',
-]);
 
 type ResolvedLine = {
   productId: string;
@@ -165,7 +153,6 @@ export class OrdersService {
 
     const lastName = dto.lastName.trim();
     const firstName = dto.firstName.trim();
-    const middleName = (dto.middleName ?? '').trim();
     const phone = dto.phone.trim();
     if (!lastName || !firstName) {
       throw new BadRequestException('Укажите фамилию и имя');
@@ -189,7 +176,6 @@ export class OrdersService {
     const recipientName = formatPersonName({
       lastName,
       firstName,
-      middleName,
     });
 
     const owner = sessionUser
@@ -202,7 +188,7 @@ export class OrdersService {
             if (!existing.emailVerifiedAt) {
               return this.prisma.user.update({
                 where: { id: existing.id },
-                data: { phone, lastName, firstName, middleName },
+                data: { phone, lastName, firstName },
               });
             }
             return existing;
@@ -213,7 +199,6 @@ export class OrdersService {
               phone,
               lastName,
               firstName,
-              middleName,
             },
           });
         })();
@@ -222,7 +207,7 @@ export class OrdersService {
     if (sessionUser) {
       await this.prisma.user.update({
         where: { id: sessionUser.id },
-        data: { phone, lastName, firstName, middleName },
+        data: { phone, lastName, firstName },
       });
     }
 
@@ -340,7 +325,6 @@ export class OrdersService {
         recipientName,
         lastName,
         firstName,
-        middleName,
         comment: `Заказ Агнюша · ${dto.cityLabel}`,
         cityLabel: dto.cityLabel,
         items: resolvedItems.map((item) => ({
@@ -410,7 +394,6 @@ export class OrdersService {
           phone,
           lastName,
           firstName,
-          middleName,
           contactChannel: dto.contactChannel.trim(),
           cityLabel: dto.cityLabel.trim(),
           deliveryCode,
@@ -625,6 +608,9 @@ export class OrdersService {
         { phone: { contains: q, mode: 'insensitive' } },
         { cityLabel: { contains: q, mode: 'insensitive' } },
         { pickupLabel: { contains: q, mode: 'insensitive' } },
+        { deliveryTrackNumber: { contains: q, mode: 'insensitive' } },
+        { externalDeliveryId: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
         { user: { email: { contains: q, mode: 'insensitive' } } },
       ];
     }
@@ -675,8 +661,12 @@ export class OrdersService {
       counts[row.status] = all ?? 0;
     }
 
+    const synced = await Promise.all(
+      orders.map((order) => this.syncDeliveryTracking(order)),
+    );
+
     return {
-      items: orders.map((o) => this.mapAdmin(o)),
+      items: synced.map((o) => this.mapAdmin(o)),
       total,
       page,
       limit,
@@ -857,6 +847,9 @@ export class OrdersService {
       if (err instanceof CdekEntityNotFoundError) {
         return this.markCarrierShipmentGone(order, 'СДЭК');
       }
+      if (err instanceof YandexEntityNotFoundError) {
+        return this.markCarrierShipmentGone(order, 'Яндекс Доставка');
+      }
       if (err instanceof PochtaEntityNotFoundError) {
         return this.markCarrierShipmentGone(order, 'Почта России');
       }
@@ -920,7 +913,6 @@ export class OrdersService {
     phone: string;
     lastName?: string;
     firstName?: string;
-    middleName?: string | null;
     contactChannel: string;
     cityLabel: string;
     deliveryCode: string;
@@ -963,7 +955,6 @@ export class OrdersService {
       phone: order.phone,
       lastName: order.lastName ?? '',
       firstName: order.firstName ?? '',
-      middleName: order.middleName ?? '',
       contactChannel: order.contactChannel,
       cityLabel: order.cityLabel,
       deliveryCode: order.deliveryCode,

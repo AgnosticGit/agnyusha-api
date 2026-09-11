@@ -23,7 +23,8 @@
     "prisma:migrate": "node --env-file=.env.development ./node_modules/prisma/build/index.js migrate dev",
     "prisma:deploy": "node --env-file=.env.production ./node_modules/prisma/build/index.js migrate deploy",
     "db:seed": "node --env-file=.env.development ./node_modules/prisma/build/index.js db seed",
-    "db:setup": "node --env-file=.env.development ./node_modules/prisma/build/index.js migrate deploy && node --env-file=.env.development ./node_modules/prisma/build/index.js db seed"
+    "db:setup": "node --env-file=.env.development ./node_modules/prisma/build/index.js migrate deploy && node --env-file=.env.development ./node_modules/prisma/build/index.js db seed",
+    "db:prices-half": "node --env-file=.env.development scripts/set-test-prices.mjs"
   },
   "prisma": {
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\",\"types\":[\"node\"]} prisma/seed.ts"

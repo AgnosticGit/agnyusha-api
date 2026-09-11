@@ -10,14 +10,12 @@ describe('person-name', () => {
         formatPersonName({
           lastName: 'Иванов',
           firstName: 'Иван',
-          middleName: 'Иванович',
         }),
-      ).toBe('Иванов Иван Иванович');
+      ).toBe('Иванов Иван');
       expect(
         formatPersonName({
           lastName: '  Петров ',
           firstName: null,
-          middleName: undefined,
         }),
       ).toBe('Петров');
     });

@@ -7,6 +7,8 @@ import type { PrismaService } from '../../src/prisma/prisma.service';
 import type { PochtaService } from '../../src/pochta/pochta.service';
 import type { OzonDeliveryService } from '../../src/ozon-delivery/ozon-delivery.service';
 import type { YandexDeliveryService } from '../../src/yandex/yandex-delivery.service';
+import type { DeliveryTrackingPoller } from '../../src/orders/delivery-tracking.poller';
+import type { DeliveryPollSnapshot } from '../../src/orders/delivery-poll.util';
 
 type Deps = {
   prisma: { $queryRaw: jest.Mock };
@@ -29,7 +31,23 @@ type Deps = {
   payments: { isConfigured: jest.Mock; ping: jest.Mock };
   auth: { isGoogleConfigured: jest.Mock };
   mail: { isConfigured: jest.Mock };
+  poller: { snapshot: jest.Mock };
 };
+
+function idleSnapshot(
+  carrier: DeliveryPollSnapshot['carrier'],
+): DeliveryPollSnapshot {
+  return {
+    carrier,
+    enabled: true,
+    intervalMs: 60 * 60_000,
+    gapMs: 2500,
+    activeCount: 0,
+    lastSuccessAt: null,
+    lastAttemptAt: null,
+    lastError: null,
+  };
+}
 
 function makeService(overrides: Partial<Deps> = {}) {
   const deps: Deps = {
@@ -73,6 +91,14 @@ function makeService(overrides: Partial<Deps> = {}) {
       isConfigured: jest.fn().mockReturnValue(false),
       ...overrides.mail,
     },
+    poller: {
+      snapshot: jest
+        .fn()
+        .mockImplementation(async (carrier: DeliveryPollSnapshot['carrier']) =>
+          idleSnapshot(carrier),
+        ),
+      ...overrides.poller,
+    },
   };
 
   const service = new HealthService(
@@ -84,6 +110,7 @@ function makeService(overrides: Partial<Deps> = {}) {
     deps.payments as unknown as PaymentsService,
     deps.auth as unknown as AuthService,
     deps.mail as unknown as ResendMailService,
+    deps.poller as unknown as DeliveryTrackingPoller,
   );
 
   return { service, deps };
@@ -190,6 +217,9 @@ describe('HealthService', () => {
         status: 'degraded',
         configured: true,
       });
+      expect(report.checks.find((c) => c.id === 'yandex')?.message).toContain(
+        'YANDEX_PLATFORM_STATION_ID',
+      );
     });
 
     it('marks pochta degraded when FROM_INDEX is missing', async () => {
@@ -207,6 +237,30 @@ describe('HealthService', () => {
         configured: true,
         message: expect.stringContaining('POCHTA_FROM_INDEX'),
       });
+    });
+
+    it('appends poll stats and degrades when the queue cannot keep up', async () => {
+      const { service } = makeService({
+        cdek: {
+          isConfigured: jest.fn().mockReturnValue(true),
+          ping: jest.fn().mockResolvedValue(undefined),
+        },
+        poller: {
+          snapshot: jest.fn().mockResolvedValue({
+            ...idleSnapshot('CDEK'),
+            activeCount: 5000,
+            lastSuccessAt: new Date('2026-09-11T13:03:00.000Z'),
+          }),
+        },
+      });
+      const report = await service.fullReport();
+      const cdek = report.checks.find((c) => c.id === 'cdek');
+      expect(report.status).toBe('degraded');
+      expect(cdek?.status).toBe('degraded');
+      expect(cdek?.message).toContain('OAuth токен получен');
+      expect(cdek?.message).toContain('очередь 5000');
+      expect(cdek?.message).toContain('2026-09-11T13:03:00.000Z');
+      expect(cdek?.message).toContain('не укладывается в интервал');
     });
   });
 });

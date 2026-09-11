@@ -638,7 +638,6 @@ export class PaymentsService {
           recipientName: formatPersonName(order),
           lastName: order.lastName,
           firstName: order.firstName,
-          middleName: order.middleName ?? undefined,
           comment: `Заказ Агнюша · ${order.cityLabel}`,
           cityLabel: order.cityLabel,
           items: order.items.map((item) => ({

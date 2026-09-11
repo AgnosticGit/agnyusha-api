@@ -597,4 +597,141 @@ describe('Delivery tracking poll (e2e)', () => {
       await app.close();
     }
   });
+
+  it('archives order when Yandex returns customer_order_not_found', async () => {
+    let infoCalls = 0;
+    const mock = createMockYandexFetch(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method || 'GET').toUpperCase();
+
+      if (url.includes('/request/info') && method === 'GET') {
+        infoCalls += 1;
+        return jsonResponse(
+          {
+            message: 'there is no customer_order with such id in platform',
+            code: 'customer_order_not_found',
+          },
+          404,
+        );
+      }
+
+      return jsonResponse({ message: `unexpected ${method} ${url}` }, 500);
+    });
+
+    const { app } = await createTestApp({
+      yandexFetch: mock.fetchMock,
+      cdek: 'missing',
+      yandex: 'present',
+    });
+    const prisma = app.get(PrismaService);
+
+    try {
+      const { user, raw } = await seedUserSession(
+        prisma,
+        'yandex-gone@example.com',
+      );
+
+      const order = await prisma.order.create({
+        data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          userId: user.id,
+          phone: '+79001112233',
+          contactChannel: 'Telegram',
+          cityLabel: 'Москва',
+          deliveryCode: DeliveryMethodCode.YANDEX,
+          deliveryTitle: 'Яндекс Доставка',
+          pickupLabel: 'ПВЗ',
+          pickupCode: 'point-1',
+          status: OrderStatus.PAID,
+          paidAt: new Date(),
+          total: 500,
+          externalDeliveryId: 'yandex-request-test-1',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const listed = await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+
+      const row = listed.body.items.find(
+        (o: { id: string }) => o.id === order.id,
+      );
+      expect(row.status).toBe('ARCHIVED');
+      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(row.deliveryTracking.statusLabel).toContain('Яндекс');
+      expect(infoCalls).toBe(1);
+
+      await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+      expect(infoCalls).toBe(1);
+
+      const keptDone = await prisma.order.create({
+        data: {
+          email: 'buyer2@example.com',
+          lastName: 'Петров',
+          firstName: 'Пётр',
+          userId: user.id,
+          phone: '+79001112234',
+          contactChannel: 'Telegram',
+          cityLabel: 'Москва',
+          deliveryCode: DeliveryMethodCode.YANDEX,
+          deliveryTitle: 'Яндекс Доставка',
+          pickupLabel: 'ПВЗ',
+          pickupCode: 'point-1',
+          status: OrderStatus.DONE,
+          paidAt: new Date(),
+          total: 500,
+          externalDeliveryId: 'yandex-request-test-1',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const listed2 = await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+      const doneRow = listed2.body.items.find(
+        (o: { id: string }) => o.id === keptDone.id,
+      );
+      expect(doneRow.status).toBe('DONE');
+      expect(doneRow.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(infoCalls).toBe(2);
+
+      await prisma.order.delete({ where: { id: order.id } });
+      await prisma.order.delete({ where: { id: keptDone.id } });
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
+    } finally {
+      await app.close();
+    }
+  });
 });

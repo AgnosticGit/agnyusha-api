@@ -10,6 +10,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PochtaService } from '../pochta/pochta.service';
 import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
+import { DeliveryTrackingPoller } from '../orders/delivery-tracking.poller';
+import {
+  appendPollMessage,
+  evaluatePollHealth,
+  formatPollHealthMessage,
+  mergeHealthStatus,
+} from '../orders/delivery-poll.util';
+import type { DeliveryPollCarrier } from '../orders/delivery-poll.util';
 import type {
   HealthCheckItem,
   HealthReport,
@@ -31,6 +39,7 @@ export class HealthService {
     private readonly payments: PaymentsService,
     private readonly auth: AuthService,
     private readonly mail: ResendMailService,
+    private readonly poller: DeliveryTrackingPoller,
   ) {}
 
   live() {
@@ -133,7 +142,7 @@ export class HealthService {
     });
   }
 
-  private async checkCdek(): Promise<HealthCheckItem> {
+  private checkCdek(): Promise<HealthCheckItem> {
     return this.runCheck(
       'cdek',
       'СДЭК',
@@ -141,12 +150,15 @@ export class HealthService {
       this.cdek.isConfigured(),
       async () => {
         await this.cdek.ping();
-        return { status: 'ok', message: 'OAuth токен получен' };
+        return this.withPoll('CDEK', {
+          status: 'ok',
+          message: 'OAuth токен получен',
+        });
       },
     );
   }
 
-  private async checkYandex(): Promise<HealthCheckItem> {
+  private checkYandex(): Promise<HealthCheckItem> {
     return this.runCheck(
       'yandex',
       'Яндекс Доставка',
@@ -155,17 +167,17 @@ export class HealthService {
       async () => {
         await this.yandex.ping();
         const orderReady = this.yandex.isOrderCreationConfigured();
-        return {
+        return this.withPoll('YANDEX', {
           status: orderReady ? 'ok' : 'degraded',
           message: orderReady
             ? 'API отвечает'
             : 'Токен есть, но YANDEX_PLATFORM_STATION_ID не задан',
-        };
+        });
       },
     );
   }
 
-  private async checkPochta(): Promise<HealthCheckItem> {
+  private checkPochta(): Promise<HealthCheckItem> {
     return this.runCheck(
       'pochta',
       'Почта России',
@@ -174,14 +186,29 @@ export class HealthService {
       async () => {
         await this.pochta.ping();
         const orderReady = this.pochta.isOrderCreationConfigured();
-        return {
+        return this.withPoll('POST', {
           status: orderReady ? 'ok' : 'degraded',
           message: orderReady
             ? 'API отвечает'
             : 'Токен есть, но POCHTA_FROM_INDEX не задан',
-        };
+        });
       },
     );
+  }
+
+  private async withPoll(
+    carrier: DeliveryPollCarrier,
+    ping: { status: HealthStatus; message?: string | null },
+  ): Promise<{ status: HealthStatus; message?: string | null }> {
+    const snapshot = await this.poller.snapshot(carrier);
+    const pollStatus = evaluatePollHealth(snapshot);
+    return {
+      status: mergeHealthStatus(ping.status, pollStatus),
+      message: appendPollMessage(
+        ping.message,
+        formatPollHealthMessage(snapshot),
+      ),
+    };
   }
 
   private async checkOzonDelivery(): Promise<HealthCheckItem> {

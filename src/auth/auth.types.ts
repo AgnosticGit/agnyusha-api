@@ -7,7 +7,6 @@ export type AuthUser = {
   phone: string;
   lastName: string;
   firstName: string;
-  middleName: string;
   role: UserRole;
   permissions: StaffPermission[];
 };

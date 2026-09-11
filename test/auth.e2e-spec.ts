@@ -217,14 +217,13 @@ describe('Auth magic link (e2e)', () => {
         phone: '+7 (999) 123-45-67',
         lastName: 'Иванов',
         firstName: 'Иван',
-        middleName: 'Иванович',
       })
       .expect(200);
 
     expect(res.body.user.email).toBe(email);
     expect(res.body.user.lastName).toBe('Иванов');
     expect(res.body.user.firstName).toBe('Иван');
-    expect(res.body.user.middleName).toBe('Иванович');
+    expect(res.body.user.middleName).toBeUndefined();
     expect(res.body.user.phone).toContain('999');
   });
 

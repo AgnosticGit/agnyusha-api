@@ -1,0 +1,16 @@
+/** Carrier codes that mean tracking is finished — stop polling. */
+export const FINAL_DELIVERY_STATUS_CODES = new Set([
+  'DELIVERED',
+  'NOT_DELIVERED',
+  'REMOVED',
+  'INVALID',
+  'DESTROYED',
+  'DELIVERED_FINISH',
+  'RETURNED_FINISH',
+  'CANCELLED',
+  'CANCELLED_USER',
+  'SORTING_CENTER_CANCELLED',
+  'DELIVERY_TRACKING_FINISHED',
+]);
+
+export const FINAL_DELIVERY_STATUS_CODE_LIST = [...FINAL_DELIVERY_STATUS_CODES];

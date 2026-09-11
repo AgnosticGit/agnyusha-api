@@ -74,7 +74,6 @@ model User {
   phone           String           @default("")
   lastName        String           @default("") @map("last_name")
   firstName       String           @default("") @map("first_name")
-  middleName      String           @default("") @map("middle_name")
   role            UserRole         @default(USER)
   bannedAt        DateTime?        @map("banned_at")
   createdAt       DateTime         @default(now()) @map("created_at")
@@ -206,7 +205,6 @@ model Order {
   phone                String
   lastName             String      @map("last_name")
   firstName            String      @map("first_name")
-  middleName           String      @default("") @map("middle_name")
   contactChannel       String      @map("contact_channel")
   cityLabel            String      @map("city_label")
   deliveryCode         String      @map("delivery_code")

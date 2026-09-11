@@ -1,6 +1,5 @@
 import {
   IsEmail,
-  IsOptional,
   IsString,
   MaxLength,
   MinLength,
@@ -32,9 +31,4 @@ export class UpdateProfileDto {
   @MinLength(1, { message: 'Укажите имя' })
   @MaxLength(80)
   firstName!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(80)
-  middleName?: string;
 }

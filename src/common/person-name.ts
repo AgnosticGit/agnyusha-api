@@ -2,9 +2,8 @@
 export function formatPersonName(parts: {
   lastName?: string | null;
   firstName?: string | null;
-  middleName?: string | null;
 }): string {
-  const name = [parts.lastName, parts.firstName, parts.middleName]
+  const name = [parts.lastName, parts.firstName]
     .map((part) => String(part ?? '').trim())
     .filter(Boolean)
     .join(' ')
