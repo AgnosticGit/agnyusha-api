@@ -197,7 +197,7 @@ export class PaymentsService {
   async confirmPaidByOrderId(
     orderId: string,
     clientKey: string,
-  ): Promise<{ status: string; paid: boolean }> {
+  ): Promise<{ status: string; paid: boolean; number: number }> {
     if (!this.confirmLimiter.tryConsume(clientKey || 'anon')) {
       throw new BadRequestException('Слишком много запросов, подождите');
     }
@@ -217,23 +217,24 @@ export class PaymentsService {
       return {
         status: updated?.status ?? order.status,
         paid: true,
+        number: updated?.number ?? order.number,
       };
     }
 
     if (!this.isConfigured()) {
-      return { status: order.status, paid: false };
+      return { status: order.status, paid: false, number: order.number };
     }
 
     const details = await this.fetchOzonOrderDetails(id);
     if (!details) {
-      return { status: order.status, paid: false };
+      return { status: order.status, paid: false, number: order.number };
     }
 
     if (!this.isPaidStatus(details.status)) {
       this.logger.log(
         `Ozon confirm order=${id} still status=${details.status}`,
       );
-      return { status: order.status, paid: false };
+      return { status: order.status, paid: false, number: order.number };
     }
 
     await this.markOrderPaid(id, details.id);
@@ -241,6 +242,7 @@ export class PaymentsService {
     return {
       status: updated?.status ?? OrderStatus.PAID,
       paid: true,
+      number: updated?.number ?? order.number,
     };
   }
 
@@ -489,6 +491,7 @@ export class PaymentsService {
 
   private async notifyOrderPaid(order: {
     id: string;
+    number: number;
     email: string;
     total: number;
     items: Array<{
@@ -501,7 +504,7 @@ export class PaymentsService {
     user?: { emailVerifiedAt: Date | null } | null;
   }) {
     const mail = buildOrderReceiptMail({
-      orderId: order.id,
+      orderNumber: order.number,
       total: order.total,
       items: order.items,
       webOrigin: this.publicWebUrl(),

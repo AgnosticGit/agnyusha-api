@@ -26,7 +26,7 @@ describe('order-receipt', () => {
   describe('buildOrderReceiptMail', () => {
     it('builds paid order receipt with items and optional login invite', () => {
       const guest = buildOrderReceiptMail({
-        orderId: 'cuidabcdefghijklmnop',
+        orderNumber: 10042,
         total: 1500,
         webOrigin: 'https://shop.test',
         needsLogin: true,
@@ -41,8 +41,9 @@ describe('order-receipt', () => {
           },
         ],
       });
-      expect(guest.subject).toMatch(/Заказ Агнюша №/);
+      expect(guest.subject).toBe('Заказ Агнюша №10042');
       expect(guest.text).toContain('оплачен');
+      expect(guest.text).toContain('№10042');
       expect(guest.text).toContain('Индейка <b>');
       expect(guest.text).toContain('войдите на сайте');
       expect(guest.html).toContain('Индейка &lt;b&gt;');
@@ -51,7 +52,7 @@ describe('order-receipt', () => {
       expect(guest.attachments).toHaveLength(0);
 
       const authed = buildOrderReceiptMail({
-        orderId: 'cuidabcdefghijklmnop',
+        orderNumber: 10042,
         total: 750,
         webOrigin: 'https://shop.test',
         needsLogin: false,
@@ -74,7 +75,7 @@ describe('order-receipt', () => {
 
     it('uses оформлен wording when unpaid', () => {
       const mail = buildOrderReceiptMail({
-        orderId: 'abcdefghijklmnop',
+        orderNumber: 10001,
         total: 100,
         webOrigin: 'https://shop.test',
         needsLogin: false,
@@ -83,6 +84,7 @@ describe('order-receipt', () => {
       });
       expect(mail.text).toContain('оформлен');
       expect(mail.text).not.toContain('оплачен');
+      expect(mail.subject).toBe('Заказ Агнюша №10001');
     });
   });
 
@@ -119,7 +121,7 @@ describe('order-receipt', () => {
         ).toBeNull();
 
         const mail = buildOrderReceiptMail({
-          orderId: 'cuidabcdefghijklmnop',
+          orderNumber: 10099,
           total: 100,
           webOrigin: 'https://shop.test',
           needsLogin: false,

@@ -557,7 +557,11 @@ describe('Ozon Pay (e2e)', () => {
         .send({ orderId: order.id })
         .expect(200);
 
-      expect(res.body).toEqual({ status: 'PAID', paid: true });
+      expect(res.body).toEqual({
+        status: 'PAID',
+        paid: true,
+        number: order.number,
+      });
 
       const paid = await prisma.order.findUnique({ where: { id: order.id } });
       expect(paid?.status).toBe('PAID');

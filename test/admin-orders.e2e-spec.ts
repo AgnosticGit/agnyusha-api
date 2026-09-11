@@ -55,7 +55,10 @@ describe('Admin orders CRM (e2e)', () => {
     await app.close();
   });
 
-  async function seedOrder(email: string) {
+  async function seedOrder(
+    email: string,
+    status: OrderStatus = OrderStatus.NEW,
+  ) {
     const buyer = await prisma.user.upsert({
       where: { email },
       create: { email, role: UserRole.USER },
@@ -71,7 +74,7 @@ describe('Admin orders CRM (e2e)', () => {
     return prisma.order.create({
       data: {
         userId: buyer.id,
-        status: OrderStatus.NEW,
+        status,
         email: buyer.email,
         lastName: 'Иванов',
         firstName: 'Иван',
@@ -216,6 +219,40 @@ describe('Admin orders CRM (e2e)', () => {
       .post(`/api/orders/${order.id}/cancel`)
       .set('Cookie', cookie)
       .expect(400);
+  });
+
+  it('openOnly lists unfinished orders for account badge', async () => {
+    const email = 'orders-open-only@example.com';
+    const buyer = await prisma.user.upsert({
+      where: { email },
+      create: { email, role: UserRole.USER },
+      update: {},
+    });
+    await prisma.order.deleteMany({ where: { userId: buyer.id } });
+
+    await seedOrder(email, OrderStatus.NEW);
+    await seedOrder(email, OrderStatus.PAID);
+    await seedOrder(email, OrderStatus.DONE);
+    await seedOrder(email, OrderStatus.CANCELLED);
+    await seedOrder(email, OrderStatus.ARCHIVED);
+
+    const { cookie } = await loginAs(app, email, UserRole.USER);
+
+    const all = await request(app.getHttpServer())
+      .get('/api/orders?limit=50')
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(all.body.total).toBe(5);
+
+    const open = await request(app.getHttpServer())
+      .get('/api/orders?openOnly=true&limit=1')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(open.body.total).toBe(2);
+    for (const item of open.body.items as Array<{ status: string }>) {
+      expect(['NEW', 'PAID', 'CONFIRMED', 'SHIPPED']).toContain(item.status);
+    }
   });
 
   it('does not expose admin order delete', async () => {

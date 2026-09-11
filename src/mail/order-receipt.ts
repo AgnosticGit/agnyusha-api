@@ -18,7 +18,8 @@ export type OrderReceiptMailAttachment = {
 };
 
 export type OrderReceiptMailInput = {
-  orderId: string;
+  /** Public human-facing order number (e.g. 10042). */
+  orderNumber: number;
   total: number;
   items: OrderReceiptItem[];
   webOrigin: string;
@@ -103,7 +104,7 @@ export function buildOrderReceiptMail(input: OrderReceiptMailInput): {
   html: string;
   attachments: OrderReceiptMailAttachment[];
 } {
-  const shortId = input.orderId.slice(-6).toUpperCase();
+  const shortId = String(input.orderNumber);
   const ordersUrl = `${input.webOrigin.replace(/\/$/, '')}/account/orders`;
   const statusPhrase = input.paid ? 'оплачен' : 'оформлен';
   const totalLabel = formatRub(input.total);

@@ -25,7 +25,7 @@ import { buildOrderReceiptMail } from '../mail/order-receipt';
 import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
 import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
 import { YandexEntityNotFoundError } from '../yandex/yandex.errors';
-import { orderStatusAfterCarrierGone } from './order-status.util';
+import { orderStatusAfterCarrierGone, OPEN_ORDER_STATUSES } from './order-status.util';
 import { FINAL_DELIVERY_STATUS_CODES } from './delivery-status.util';
 
 const DELIVERY_SYNC_TTL_MS = 3 * 60 * 1000;
@@ -66,6 +66,7 @@ export class OrdersService {
 
   private async notifyOrderReceipt(input: {
     id: string;
+    number: number;
     email: string;
     total: number;
     needsLogin: boolean;
@@ -79,7 +80,7 @@ export class OrdersService {
     }>;
   }) {
     const mail = buildOrderReceiptMail({
-      orderId: input.id,
+      orderNumber: input.number,
       total: input.total,
       items: input.items,
       webOrigin: this.webOrigin(),
@@ -430,6 +431,7 @@ export class OrdersService {
     if (!payEnabled) {
       await this.notifyOrderReceipt({
         id: order.id,
+        number: order.number,
         email,
         total,
         needsLogin: !sessionUser?.emailVerifiedAt,
@@ -483,11 +485,16 @@ export class OrdersService {
 
   async listForUser(
     userId: string,
-    query: { page?: number; limit?: number } = {},
+    query: { page?: number; limit?: number; openOnly?: boolean } = {},
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const where = { userId };
+    const where = {
+      userId,
+      ...(query.openOnly
+        ? { status: { in: OPEN_ORDER_STATUSES } }
+        : {}),
+    };
 
     const [orders, total] = await this.prisma.$transaction([
       this.prisma.order.findMany({
@@ -603,8 +610,10 @@ export class OrdersService {
 
     const searchWhere: Prisma.OrderWhereInput = {};
     if (q) {
+      const asNumber = /^\d+$/.test(q) ? Number.parseInt(q, 10) : NaN;
       searchWhere.OR = [
         { id: { contains: q, mode: 'insensitive' } },
+        ...(Number.isFinite(asNumber) ? [{ number: asNumber }] : []),
         { phone: { contains: q, mode: 'insensitive' } },
         { cityLabel: { contains: q, mode: 'insensitive' } },
         { pickupLabel: { contains: q, mode: 'insensitive' } },
@@ -908,6 +917,7 @@ export class OrdersService {
 
   private map(order: {
     id: string;
+    number: number;
     status: string;
     email?: string;
     phone: string;
@@ -950,6 +960,7 @@ export class OrdersService {
 
     return {
       id: order.id,
+      number: order.number,
       status: order.status,
       email: order.email ?? '',
       phone: order.phone,

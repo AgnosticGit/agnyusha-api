@@ -199,6 +199,8 @@ model CartItem {
 
 model Order {
   id                   String      @id @default(cuid())
+  /// Public human-facing order number (shown as № 10042). Not used as PK.
+  number               Int         @unique @default(autoincrement())
   userId               String?     @map("user_id")
   status               OrderStatus @default(NEW)
   email                String

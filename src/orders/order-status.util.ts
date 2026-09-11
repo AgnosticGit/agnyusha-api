@@ -1,5 +1,13 @@
 import { OrderStatus } from '@prisma/client';
 
+/** In-progress statuses shown on the account «Заказы» badge. */
+export const OPEN_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.NEW,
+  OrderStatus.PAID,
+  OrderStatus.CONFIRMED,
+  OrderStatus.SHIPPED,
+];
+
 /** Terminal business statuses — do not overwrite on carrier entity-gone. */
 const KEEP_ON_CARRIER_GONE = new Set<OrderStatus>([
   OrderStatus.DONE,
