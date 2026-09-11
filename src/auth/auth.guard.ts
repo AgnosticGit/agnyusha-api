@@ -68,7 +68,7 @@ export class AuthGuard implements CanActivate {
   }
 }
 
-/** ADMIN or MANAGER — people management. */
+/** ADMIN or USER_MANAGE — people management. */
 @Injectable()
 export class ManageUsersGuard implements CanActivate {
   constructor(private readonly auth: AuthService) {}
@@ -76,7 +76,7 @@ export class ManageUsersGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const user = await requireUser(this.auth, req);
-    if (!canManageUsers(user.role)) {
+    if (!canManageUsers(user)) {
       throw new ForbiddenException('Недостаточно прав');
     }
     return true;

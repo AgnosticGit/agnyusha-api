@@ -484,12 +484,15 @@ describe('Catalog admin & orders (e2e)', () => {
   });
 
   it('staff permissions gate product and inventory APIs', async () => {
-    const manager = await loginAs(
-      app,
-      'manager-e2e@example.com',
-      UserRole.MANAGER,
-    );
+    const lead = await loginAs(app, 'lead-e2e@example.com', UserRole.STAFF);
     const prisma = app.get(PrismaService);
+    await prisma.userPermission.deleteMany({ where: { userId: lead.user.id } });
+    await prisma.userPermission.createMany({
+      data: [
+        { userId: lead.user.id, permission: 'USER_MANAGE' },
+        { userId: lead.user.id, permission: 'ANALYTICS_VIEW' },
+      ],
+    });
     const staffUser = await prisma.user.upsert({
       where: { email: 'staff-stock@example.com' },
       create: { email: 'staff-stock@example.com', role: UserRole.STAFF },
@@ -612,7 +615,7 @@ describe('Catalog admin & orders (e2e)', () => {
 
     const analytics = await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')
-      .set('Cookie', manager.cookie)
+      .set('Cookie', lead.cookie)
       .expect(200);
     expect(analytics.body.totals).toBeDefined();
     expect(Array.isArray(analytics.body.revenueByDay)).toBe(true);
@@ -623,7 +626,7 @@ describe('Catalog admin & orders (e2e)', () => {
     const ranged = await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')
       .query({ from: '2020-01-01', to: '2020-01-07' })
-      .set('Cookie', manager.cookie)
+      .set('Cookie', lead.cookie)
       .expect(200);
     expect(ranged.body.revenueByDay).toHaveLength(7);
     expect(ranged.body.totals.orders).toBe(0);
@@ -631,13 +634,13 @@ describe('Catalog admin & orders (e2e)', () => {
     await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')
       .query({ from: '2020-01-01', to: '2022-01-01' })
-      .set('Cookie', manager.cookie)
+      .set('Cookie', lead.cookie)
       .expect(400);
 
     const productAnalytics = await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')
       .query({ productId: created.body.id })
-      .set('Cookie', manager.cookie)
+      .set('Cookie', lead.cookie)
       .expect(200);
     expect(productAnalytics.body.selectedProduct).toEqual(
       expect.objectContaining({
@@ -650,12 +653,12 @@ describe('Catalog admin & orders (e2e)', () => {
     await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')
       .query({ productId: 'missing-product-id' })
-      .set('Cookie', manager.cookie)
+      .set('Cookie', lead.cookie)
       .expect(404);
 
     const promoted = await request(app.getHttpServer())
       .patch(`/api/admin/users/${staffUser.id}/role`)
-      .set('Cookie', manager.cookie)
+      .set('Cookie', lead.cookie)
       .send({
         role: 'STAFF',
         permissions: ['PRODUCT_CREATE', 'PRODUCT_STOCK'],

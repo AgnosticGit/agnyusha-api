@@ -477,4 +477,104 @@ describe('Cart guest persist & merge (e2e)', () => {
         expect(res.body.items).toHaveLength(0);
       });
   });
+
+  it('creating an order removes ordered variants from the cart', async () => {
+    const buyer = await loginAs(app, 'cart-order-buyer@example.com');
+    const add = await request(app.getHttpServer())
+      .put('/api/cart/items')
+      .set('Cookie', buyer.cookie)
+      .send({ variantId, qty: 2 })
+      .expect(200);
+    expect(add.body.items).toHaveLength(1);
+
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', buyer.cookie)
+      .send({
+        email: 'cart-order-buyer@example.com',
+        lastName: 'Иванов',
+        firstName: 'Иван',
+        phone: '+7 (999) 111-22-33',
+        contactChannel: 'Telegram',
+        cityLabel: 'Санкт-Петербург',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        items: [{ variantId, qty: 2 }],
+      })
+      .expect(201);
+
+    const cart = await request(app.getHttpServer())
+      .get('/api/cart')
+      .set('Cookie', buyer.cookie)
+      .expect(200);
+    expect(cart.body.items).toHaveLength(0);
+  });
+
+  it('guest order clears ordered variants from the guest cart', async () => {
+    const add = await request(app.getHttpServer())
+      .put('/api/cart/items')
+      .send({ variantId, qty: 1 })
+      .expect(200);
+    const guestCookie = pickCookie(add.headers['set-cookie'], CART_COOKIE);
+    expect(guestCookie).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', guestCookie!)
+      .send({
+        email: 'cart-guest-order@example.com',
+        lastName: 'Петров',
+        firstName: 'Пётр',
+        phone: '+7 (999) 222-33-44',
+        contactChannel: 'WhatsApp',
+        cityLabel: 'Москва',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        items: [{ variantId, qty: 1 }],
+      })
+      .expect(201);
+
+    const cart = await request(app.getHttpServer())
+      .get('/api/cart')
+      .set('Cookie', guestCookie!)
+      .expect(200);
+    expect(cart.body.items).toHaveLength(0);
+  });
+
+  it('order removes only ordered variants and keeps the rest', async () => {
+    const buyer = await loginAs(app, 'cart-order-partial@example.com');
+    await request(app.getHttpServer())
+      .put('/api/cart/items')
+      .set('Cookie', buyer.cookie)
+      .send({ variantId, qty: 1 })
+      .expect(200);
+    await request(app.getHttpServer())
+      .put('/api/cart/items')
+      .set('Cookie', buyer.cookie)
+      .send({ variantId: lowStockVariantId, qty: 1 })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', buyer.cookie)
+      .send({
+        email: 'cart-order-partial@example.com',
+        lastName: 'Сидоров',
+        firstName: 'Сидор',
+        phone: '+7 (999) 333-44-55',
+        contactChannel: 'Telegram',
+        cityLabel: 'Казань',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        items: [{ variantId, qty: 1 }],
+      })
+      .expect(201);
+
+    const cart = await request(app.getHttpServer())
+      .get('/api/cart')
+      .set('Cookie', buyer.cookie)
+      .expect(200);
+    expect(cart.body.items).toHaveLength(1);
+    expect(cart.body.items[0].variantId).toBe(lowStockVariantId);
+  });
 });

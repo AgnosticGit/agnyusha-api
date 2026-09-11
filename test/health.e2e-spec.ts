@@ -88,8 +88,8 @@ describe('Health (e2e)', () => {
   it('GET /api/admin/health forbids non-admin staff', async () => {
     const { cookie } = await loginAs(
       app,
-      'health-manager@example.com',
-      UserRole.MANAGER,
+      'health-staff@example.com',
+      UserRole.STAFF,
     );
     await request(app.getHttpServer())
       .get('/api/admin/health')

@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { DeliveryMethodCode, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CartService } from '../cart/cart.service';
 import { PaymentsService } from '../payments/payments.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { CdekService, cdekTrackingUrl } from '../cdek/cdek.service';
@@ -47,6 +48,7 @@ export class OrdersService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly cart: CartService,
     private readonly yandex: YandexDeliveryService,
     private readonly cdek: CdekService,
     private readonly pochta: PochtaService,
@@ -146,7 +148,11 @@ export class OrdersService {
     return resolved;
   }
 
-  async create(sessionUserId: string | null, dto: CreateOrderDto) {
+  async create(
+    sessionUserId: string | null,
+    dto: CreateOrderDto,
+    cartOpts: { guestRawToken?: string } = {},
+  ) {
     const deliveryCode = dto.deliveryCode.trim().toUpperCase();
     const pickupCode = dto.pickupCode?.trim() || null;
     const payEnabled = this.payments.isConfigured();
@@ -428,6 +434,22 @@ export class OrdersService {
       });
     });
 
+    const clearOrderedFromCart = async () => {
+      try {
+        await this.cart.removeVariants({
+          userId: sessionUserId,
+          guestRawToken: cartOpts.guestRawToken,
+          variantIds: resolvedItems.map((i) => i.variantId),
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Cart cleanup after order ${order.id} failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    };
+
     if (!payEnabled) {
       await this.notifyOrderReceipt({
         id: order.id,
@@ -444,6 +466,7 @@ export class OrdersService {
           image: i.image,
         })),
       });
+      await clearOrderedFromCart();
       return this.map(order);
     }
 
@@ -474,6 +497,7 @@ export class OrdersService {
         },
       });
 
+      await clearOrderedFromCart();
       return { ...this.map(updated), payUrl: payment.payLink };
     } catch (err) {
       await this.prisma.order

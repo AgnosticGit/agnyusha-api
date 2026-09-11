@@ -1,11 +1,7 @@
 import { StaffPermission, UserRole } from '@prisma/client';
 import type { AuthUser } from './auth.types';
 
-export const STAFF_ROLES: UserRole[] = [
-  UserRole.STAFF,
-  UserRole.MANAGER,
-  UserRole.ADMIN,
-];
+export const STAFF_ROLES: UserRole[] = [UserRole.STAFF, UserRole.ADMIN];
 
 export const PRODUCT_PERMISSIONS: StaffPermission[] = [
   StaffPermission.PRODUCT_CREATE,
@@ -17,14 +13,12 @@ export const PRODUCT_PERMISSIONS: StaffPermission[] = [
 export const ALL_STAFF_PERMISSIONS: StaffPermission[] = [
   ...PRODUCT_PERMISSIONS,
   StaffPermission.ORDER_MANAGE,
+  StaffPermission.USER_MANAGE,
+  StaffPermission.ANALYTICS_VIEW,
 ];
 
 export function isStaffRole(role: UserRole): boolean {
   return STAFF_ROLES.includes(role);
-}
-
-export function canManageUsers(role: UserRole): boolean {
-  return role === UserRole.ADMIN || role === UserRole.MANAGER;
 }
 
 export function hasPermission(
@@ -42,19 +36,24 @@ export function hasAnyProductPermission(
   return user.permissions.some((p) => PRODUCT_PERMISSIONS.includes(p));
 }
 
+/** ADMIN always; otherwise USER_MANAGE. */
+export function canManageUsers(
+  user: Pick<AuthUser, 'role' | 'permissions'>,
+): boolean {
+  return hasPermission(user, StaffPermission.USER_MANAGE);
+}
+
 export function canManageOrders(
   user: Pick<AuthUser, 'role' | 'permissions'>,
 ): boolean {
   return hasPermission(user, StaffPermission.ORDER_MANAGE);
 }
 
+/** ADMIN always; otherwise ANALYTICS_VIEW. */
 export function canAccessAnalytics(
   user: Pick<AuthUser, 'role' | 'permissions'>,
 ): boolean {
-  if (user.role === UserRole.ADMIN || user.role === UserRole.MANAGER) {
-    return true;
-  }
-  return hasAnyProductPermission(user);
+  return hasPermission(user, StaffPermission.ANALYTICS_VIEW);
 }
 
 /** System health / ops monitoring — ADMIN only. */

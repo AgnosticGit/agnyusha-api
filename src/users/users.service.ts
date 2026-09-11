@@ -63,7 +63,7 @@ export class UsersService {
     if (params.category === 'clients') {
       where.role = UserRole.USER;
     } else if (params.category === 'staff') {
-      where.role = { in: [UserRole.STAFF, UserRole.MANAGER, UserRole.ADMIN] };
+      where.role = { in: [UserRole.STAFF, UserRole.ADMIN] };
     }
 
     const [rows, total] = await this.prisma.$transaction([
@@ -77,7 +77,7 @@ export class UsersService {
     ]);
 
     const staffIds = rows
-      .filter((u) => u.role === UserRole.STAFF || u.role === UserRole.MANAGER)
+      .filter((u) => u.role === UserRole.STAFF)
       .map((u) => u.id);
 
     const permissionRows =
@@ -131,7 +131,7 @@ export class UsersService {
     }
 
     const nextPermissions =
-      role === UserRole.STAFF || role === UserRole.MANAGER
+      role === UserRole.STAFF
         ? [
             ...new Set(
               (permissions ?? []).filter((p) =>

@@ -19,7 +19,6 @@ enum DeliveryMethodCode {
 enum UserRole {
   USER
   STAFF
-  MANAGER
   ADMIN
 }
 
@@ -29,6 +28,8 @@ enum StaffPermission {
   PRODUCT_EDIT
   PRODUCT_STOCK
   ORDER_MANAGE
+  USER_MANAGE
+  ANALYTICS_VIEW
 }
 
 enum ProductCategory {

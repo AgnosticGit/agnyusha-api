@@ -16,6 +16,7 @@ import {
   OrdersAccessGuard,
   type AuthedRequest,
 } from '../auth/auth.guard';
+import { CART_COOKIE } from '../auth/auth.crypto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
 import { ListMyOrdersDto } from './dto/list-my-orders.dto';
@@ -64,7 +65,9 @@ export class OrdersController {
   @HttpCode(201)
   @UseGuards(OptionalAuthGuard)
   create(@Req() req: AuthedRequest, @Body() body: CreateOrderDto) {
-    return this.orders.create(req.user?.id ?? null, body);
+    return this.orders.create(req.user?.id ?? null, body, {
+      guestRawToken: req.cookies?.[CART_COOKIE],
+    });
   }
 }
 

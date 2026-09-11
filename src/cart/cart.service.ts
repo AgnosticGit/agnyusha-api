@@ -461,6 +461,36 @@ export class CartService {
     return this.upsertItem({ ...opts, qty: 0 });
   }
 
+  /** Drop ordered lines from user and/or guest cart (best-effort after checkout). */
+  async removeVariants(opts: {
+    userId?: string | null;
+    guestRawToken?: string | null;
+    variantIds: string[];
+  }): Promise<void> {
+    const variantIds = [
+      ...new Set(opts.variantIds.filter((id) => Boolean(id))),
+    ];
+    if (!variantIds.length) return;
+
+    if (opts.userId) {
+      const cart = await this.findUserCart(opts.userId);
+      if (cart) {
+        await this.prisma.cartItem.deleteMany({
+          where: { cartId: cart.id, variantId: { in: variantIds } },
+        });
+      }
+    }
+
+    if (opts.guestRawToken) {
+      const guest = await this.findGuestCart(opts.guestRawToken);
+      if (guest) {
+        await this.prisma.cartItem.deleteMany({
+          where: { cartId: guest.id, variantId: { in: variantIds } },
+        });
+      }
+    }
+  }
+
   async clearCart(opts: {
     userId?: string;
     guestRawToken?: string;

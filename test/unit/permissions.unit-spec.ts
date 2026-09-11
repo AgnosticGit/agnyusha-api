@@ -15,11 +15,7 @@ import {
 describe('permissions', () => {
   describe('constants', () => {
     it('lists staff roles', () => {
-      expect(STAFF_ROLES).toEqual([
-        UserRole.STAFF,
-        UserRole.MANAGER,
-        UserRole.ADMIN,
-      ]);
+      expect(STAFF_ROLES).toEqual([UserRole.STAFF, UserRole.ADMIN]);
     });
 
     it('lists product and all staff permissions', () => {
@@ -32,25 +28,37 @@ describe('permissions', () => {
       expect(ALL_STAFF_PERMISSIONS).toEqual([
         ...PRODUCT_PERMISSIONS,
         StaffPermission.ORDER_MANAGE,
+        StaffPermission.USER_MANAGE,
+        StaffPermission.ANALYTICS_VIEW,
       ]);
     });
   });
 
   describe('isStaffRole', () => {
-    it('is true for STAFF/MANAGER/ADMIN and false for USER', () => {
+    it('is true for STAFF/ADMIN and false for USER', () => {
       expect(isStaffRole(UserRole.USER)).toBe(false);
       expect(isStaffRole(UserRole.STAFF)).toBe(true);
-      expect(isStaffRole(UserRole.MANAGER)).toBe(true);
       expect(isStaffRole(UserRole.ADMIN)).toBe(true);
     });
   });
 
   describe('canManageUsers', () => {
-    it('allows ADMIN and MANAGER only', () => {
-      expect(canManageUsers(UserRole.USER)).toBe(false);
-      expect(canManageUsers(UserRole.STAFF)).toBe(false);
-      expect(canManageUsers(UserRole.MANAGER)).toBe(true);
-      expect(canManageUsers(UserRole.ADMIN)).toBe(true);
+    it('allows ADMIN or USER_MANAGE', () => {
+      expect(
+        canManageUsers({ role: UserRole.USER, permissions: [] }),
+      ).toBe(false);
+      expect(
+        canManageUsers({ role: UserRole.STAFF, permissions: [] }),
+      ).toBe(false);
+      expect(
+        canManageUsers({
+          role: UserRole.STAFF,
+          permissions: [StaffPermission.USER_MANAGE],
+        }),
+      ).toBe(true);
+      expect(
+        canManageUsers({ role: UserRole.ADMIN, permissions: [] }),
+      ).toBe(true);
     });
   });
 
@@ -64,7 +72,7 @@ describe('permissions', () => {
       ).toBe(true);
     });
 
-    it('checks STAFF/MANAGER/USER permission lists', () => {
+    it('checks STAFF/USER permission lists', () => {
       expect(
         hasPermission(
           {
@@ -83,15 +91,6 @@ describe('permissions', () => {
           StaffPermission.ORDER_MANAGE,
         ),
       ).toBe(false);
-      expect(
-        hasPermission(
-          {
-            role: UserRole.MANAGER,
-            permissions: [StaffPermission.ORDER_MANAGE],
-          },
-          StaffPermission.ORDER_MANAGE,
-        ),
-      ).toBe(true);
       expect(
         hasPermission(
           { role: UserRole.USER, permissions: [] },
@@ -140,7 +139,7 @@ describe('permissions', () => {
       ).toBe(true);
       expect(
         canManageOrders({
-          role: UserRole.MANAGER,
+          role: UserRole.STAFF,
           permissions: [StaffPermission.PRODUCT_EDIT],
         }),
       ).toBe(false);
@@ -148,26 +147,20 @@ describe('permissions', () => {
   });
 
   describe('canAccessAnalytics', () => {
-    it('allows ADMIN and MANAGER', () => {
+    it('allows ADMIN or ANALYTICS_VIEW', () => {
       expect(
         canAccessAnalytics({ role: UserRole.ADMIN, permissions: [] }),
       ).toBe(true);
       expect(
-        canAccessAnalytics({ role: UserRole.MANAGER, permissions: [] }),
-      ).toBe(true);
-    });
-
-    it('allows STAFF with any product permission', () => {
-      expect(
         canAccessAnalytics({
           role: UserRole.STAFF,
-          permissions: [StaffPermission.PRODUCT_CREATE],
+          permissions: [StaffPermission.ANALYTICS_VIEW],
         }),
       ).toBe(true);
       expect(
         canAccessAnalytics({
           role: UserRole.STAFF,
-          permissions: [StaffPermission.ORDER_MANAGE],
+          permissions: [StaffPermission.PRODUCT_CREATE],
         }),
       ).toBe(false);
       expect(
@@ -179,7 +172,6 @@ describe('permissions', () => {
   describe('canAccessSystemHealth', () => {
     it('allows ADMIN only', () => {
       expect(canAccessSystemHealth({ role: UserRole.ADMIN })).toBe(true);
-      expect(canAccessSystemHealth({ role: UserRole.MANAGER })).toBe(false);
       expect(canAccessSystemHealth({ role: UserRole.STAFF })).toBe(false);
       expect(canAccessSystemHealth({ role: UserRole.USER })).toBe(false);
     });
