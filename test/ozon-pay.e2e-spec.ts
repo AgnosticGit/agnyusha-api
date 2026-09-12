@@ -301,12 +301,14 @@ describe('Ozon Pay (e2e)', () => {
 
   it('create order returns payUrl and webhook marks order PAID', async () => {
     const originalFetch = global.fetch;
+    let capturedExtId: string | null = null;
     global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/createOrder')) {
         const body = JSON.parse(String(init?.body ?? '{}')) as {
           extId: string;
         };
+        capturedExtId = body.extId;
         return new Response(
           JSON.stringify({
             order: {
@@ -389,6 +391,7 @@ describe('Ozon Pay (e2e)', () => {
         'https://checkout.ozon.ru/order/ozon-payment-1',
       );
       expect(order.body.paymentExternalId).toBe('ozon-payment-1');
+      expect(capturedExtId).toBe(String(order.body.number));
       expect(sent).toHaveLength(0);
 
       await request(created.app.getHttpServer())
@@ -396,7 +399,7 @@ describe('Ozon Pay (e2e)', () => {
         .send({
           order: {
             id: 'ozon-payment-1',
-            extId: order.body.id,
+            extId: String(order.body.number),
             status: 'STATUS_PAID',
           },
         })

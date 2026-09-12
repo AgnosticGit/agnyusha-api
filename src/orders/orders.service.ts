@@ -27,7 +27,10 @@ import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
 import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
 import { YandexEntityNotFoundError } from '../yandex/yandex.errors';
 import { orderStatusAfterCarrierGone, OPEN_ORDER_STATUSES } from './order-status.util';
-import { FINAL_DELIVERY_STATUS_CODES } from './delivery-status.util';
+import {
+  FINAL_DELIVERY_STATUS_CODES,
+  isCarrierAbandonedStatus,
+} from './delivery-status.util';
 
 const DELIVERY_SYNC_TTL_MS = 3 * 60 * 1000;
 
@@ -473,6 +476,7 @@ export class OrdersService {
     try {
       const payment = await this.payments.createPayment({
         orderId: order.id,
+        orderNumber: order.number,
         totalRub: total,
         items: resolvedItems.map((i) => ({
           extId: i.variantId,
@@ -612,7 +616,7 @@ export class OrdersService {
       throw new BadRequestException('Оплата временно недоступна');
     }
 
-    const fresh = await this.payments.resolvePayLink(order.id);
+    const fresh = await this.payments.resolvePayLink(order);
     if (!fresh) {
       throw new BadRequestException(
         'Ссылка на оплату недоступна. Оформите заказ заново.',
@@ -804,7 +808,6 @@ export class OrdersService {
       deliveryStatusAt: Date | null;
     },
   >(order: T): Promise<T> {
-    if (!order.externalDeliveryId) return order;
     if (
       order.deliveryCode !== DeliveryMethodCode.CDEK &&
       order.deliveryCode !== DeliveryMethodCode.YANDEX &&
@@ -812,10 +815,45 @@ export class OrdersService {
     ) {
       return order;
     }
+    const carrierLabel =
+      order.deliveryCode === DeliveryMethodCode.CDEK
+        ? 'СДЭК'
+        : order.deliveryCode === DeliveryMethodCode.YANDEX
+          ? 'Яндекс Доставка'
+          : order.deliveryCode === DeliveryMethodCode.POST
+            ? 'Почта России'
+            : 'перевозчик';
+
+    if (order.status === OrderStatus.ARCHIVED) {
+      return order;
+    }
+
+    // Create-after-pay failed (or id never saved): nothing to poll at the carrier.
+    // Archive active paid+ orders so they do not stick in «Заказы» forever.
     if (
-      order.status === OrderStatus.ARCHIVED ||
-      (order.deliveryStatusCode &&
-        FINAL_DELIVERY_STATUS_CODES.has(order.deliveryStatusCode))
+      !order.externalDeliveryId &&
+      (order.status === OrderStatus.PAID ||
+        order.status === OrderStatus.CONFIRMED ||
+        order.status === OrderStatus.SHIPPED)
+    ) {
+      return this.markCarrierShipmentGone(order, carrierLabel);
+    }
+    if (!order.externalDeliveryId) {
+      return order;
+    }
+
+    // CDEK may keep a deleted/rejected shipment as INVALID instead of 404.
+    // Heal stuck PAID+INVALID rows without waiting for another carrier call.
+    if (
+      isCarrierAbandonedStatus(order.deliveryStatusCode) &&
+      orderStatusAfterCarrierGone(order.status) !== order.status
+    ) {
+      return this.markCarrierShipmentGone(order, carrierLabel);
+    }
+
+    if (
+      order.deliveryStatusCode &&
+      FINAL_DELIVERY_STATUS_CODES.has(order.deliveryStatusCode)
     ) {
       return order;
     }
@@ -829,6 +867,9 @@ export class OrdersService {
     try {
       if (order.deliveryCode === DeliveryMethodCode.CDEK) {
         const info = await this.cdek.getOrder(order.externalDeliveryId);
+        if (isCarrierAbandonedStatus(info.statusCode)) {
+          return this.markCarrierShipmentGone(order, 'СДЭК');
+        }
         const trackNumber = info.cdekNumber || order.deliveryTrackNumber;
         const updated = await this.prisma.order.update({
           where: { id: order.id },
@@ -847,6 +888,9 @@ export class OrdersService {
 
       if (order.deliveryCode === DeliveryMethodCode.POST) {
         const info = await this.pochta.getOrder(order.externalDeliveryId);
+        if (isCarrierAbandonedStatus(info.statusCode)) {
+          return this.markCarrierShipmentGone(order, 'Почта России');
+        }
         const trackNumber = info.barcode || order.deliveryTrackNumber;
         const updated = await this.prisma.order.update({
           where: { id: order.id },
@@ -864,6 +908,9 @@ export class OrdersService {
       }
 
       const info = await this.yandex.getRequestInfo(order.externalDeliveryId);
+      if (isCarrierAbandonedStatus(info.statusCode)) {
+        return this.markCarrierShipmentGone(order, 'Яндекс Доставка');
+      }
       const updated = await this.prisma.order.update({
         where: { id: order.id },
         data: {

@@ -598,6 +598,122 @@ describe('Delivery tracking poll (e2e)', () => {
     }
   });
 
+  it('archives order when CDEK returns INVALID (incorrect order)', async () => {
+    let getOrderCalls = 0;
+    const mock = createMockCdekFetch(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method || 'GET').toUpperCase();
+
+      if (url.includes('/v2/oauth/token') && method === 'POST') {
+        return jsonResponse({
+          access_token: 'mock-access-token',
+          token_type: 'bearer',
+          expires_in: 3600,
+        });
+      }
+
+      if (url.includes('/v2/orders/invalid-uuid') && method === 'GET') {
+        getOrderCalls += 1;
+        return jsonResponse({
+          entity: {
+            uuid: 'invalid-uuid',
+            cdek_number: null,
+            statuses: [{ code: 'INVALID', name: 'Некорректный заказ' }],
+          },
+        });
+      }
+
+      return jsonResponse({ message: `unexpected ${method} ${url}` }, 500);
+    });
+
+    const { app } = await createTestApp({
+      cdekFetch: mock.fetchMock,
+      cdek: 'present',
+      yandex: 'missing',
+    });
+    const prisma = app.get(PrismaService);
+
+    try {
+      const { user, raw } = await seedUserSession(
+        prisma,
+        'cdek-invalid@example.com',
+      );
+
+      const order = await prisma.order.create({
+        data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          userId: user.id,
+          phone: '+79001112233',
+          contactChannel: 'Telegram',
+          cityLabel: 'Москва',
+          deliveryCode: DeliveryMethodCode.CDEK,
+          deliveryTitle: 'СДЭК',
+          pickupLabel: 'ПВЗ',
+          pickupCode: 'MSK99',
+          status: OrderStatus.PAID,
+          paidAt: new Date(),
+          total: 500,
+          externalDeliveryId: 'invalid-uuid',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const listed = await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+
+      const row = listed.body.items.find(
+        (o: { id: string }) => o.id === order.id,
+      );
+      expect(row.status).toBe('ARCHIVED');
+      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(row.deliveryTracking.statusLabel).toContain('СДЭК');
+      expect(getOrderCalls).toBe(1);
+
+      // Already-INVALID rows heal on next list without another CDEK call.
+      await prisma.order.update({
+        where: { id: order.id },
+        data: {
+          status: OrderStatus.PAID,
+          deliveryStatusCode: 'INVALID',
+          deliveryStatusLabel: 'Некорректный заказ',
+          deliveryStatusAt: new Date(),
+        },
+      });
+      const healed = await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+      const healedRow = healed.body.items.find(
+        (o: { id: string }) => o.id === order.id,
+      );
+      expect(healedRow.status).toBe('ARCHIVED');
+      expect(healedRow.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(getOrderCalls).toBe(1);
+
+      await prisma.order.delete({ where: { id: order.id } });
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('archives order when Yandex returns customer_order_not_found', async () => {
     let infoCalls = 0;
     const mock = createMockYandexFetch(async (input, init) => {
@@ -727,6 +843,163 @@ describe('Delivery tracking poll (e2e)', () => {
 
       await prisma.order.delete({ where: { id: order.id } });
       await prisma.order.delete({ where: { id: keptDone.id } });
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('archives order when Yandex returns CANCELLED (shop cancel)', async () => {
+    let infoCalls = 0;
+    const mock = createMockYandexFetch(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method || 'GET').toUpperCase();
+
+      if (url.includes('/request/info') && method === 'GET') {
+        infoCalls += 1;
+        return jsonResponse({
+          request_id: 'yandex-cancelled-1',
+          state: {
+            status: 'CANCELLED',
+            description: 'Заказ отменён',
+            reason: 'SHOP_CANCELLED',
+          },
+          sharing_url: 'https://dostavka.yandex.ru/route/#x',
+        });
+      }
+
+      return jsonResponse({ message: `unexpected ${method} ${url}` }, 500);
+    });
+
+    const { app } = await createTestApp({
+      yandexFetch: mock.fetchMock,
+      cdek: 'missing',
+      yandex: 'present',
+    });
+    const prisma = app.get(PrismaService);
+
+    try {
+      const { user, raw } = await seedUserSession(
+        prisma,
+        'yandex-cancelled@example.com',
+      );
+
+      const order = await prisma.order.create({
+        data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          userId: user.id,
+          phone: '+79001112233',
+          contactChannel: 'Telegram',
+          cityLabel: 'Москва',
+          deliveryCode: DeliveryMethodCode.YANDEX,
+          deliveryTitle: 'Яндекс Доставка',
+          pickupLabel: 'ПВЗ',
+          pickupCode: 'point-1',
+          status: OrderStatus.PAID,
+          paidAt: new Date(),
+          total: 500,
+          externalDeliveryId: 'yandex-cancelled-1',
+          deliveryTrackNumber: 'yandex-cancelled-1',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const listed = await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+
+      const row = listed.body.items.find(
+        (o: { id: string }) => o.id === order.id,
+      );
+      expect(row.status).toBe('ARCHIVED');
+      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(row.deliveryTracking.statusLabel).toContain('Яндекс');
+      expect(infoCalls).toBe(1);
+
+      await prisma.order.delete({ where: { id: order.id } });
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('archives PAID POST order when externalDeliveryId was never created', async () => {
+    const { app } = await createTestApp({
+      cdek: 'missing',
+      yandex: 'missing',
+      pochta: 'present',
+    });
+    const prisma = app.get(PrismaService);
+
+    try {
+      const { user, raw } = await seedUserSession(
+        prisma,
+        'pochta-no-id@example.com',
+      );
+
+      const order = await prisma.order.create({
+        data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          userId: user.id,
+          phone: '+79001112233',
+          contactChannel: 'Telegram',
+          cityLabel: 'Санкт-Петербург',
+          deliveryCode: DeliveryMethodCode.POST,
+          deliveryTitle: 'Почта России',
+          pickupLabel: 'ОПС',
+          pickupCode: '190614',
+          status: OrderStatus.PAID,
+          paidAt: new Date(),
+          total: 500,
+          externalDeliveryId: null,
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '250 г.',
+                weightGrams: 250,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const listed = await request(app.getHttpServer())
+        .get('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+
+      const row = listed.body.items.find(
+        (o: { id: string }) => o.id === order.id,
+      );
+      expect(row.status).toBe('ARCHIVED');
+      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(row.deliveryTracking.statusLabel).toContain('Почта');
+
+      await prisma.order.delete({ where: { id: order.id } });
       await prisma.user
         .delete({ where: { id: user.id } })
         .catch(() => undefined);

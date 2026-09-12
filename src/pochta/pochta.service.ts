@@ -377,11 +377,17 @@ export class PochtaService {
     const regionTo = office.region?.trim() || placeTo;
     const addressSource = (office['address-source'] || '').trim();
 
+    // ISO 3166-1 numeric country code — required by Otpravka (643 = Russia).
+    const mailDirect = Number(
+      this.config.get<string>('POCHTA_MAIL_DIRECT')?.trim() || '643',
+    );
+
     const backlogBody = [
       {
         'address-type-to': 'DEFAULT',
         'mail-category': this.mailCategory,
         'mail-type': this.mailType,
+        'mail-direct': Number.isFinite(mailDirect) ? mailDirect : 643,
         mass,
         'order-num': input.orderNumber.slice(0, 20),
         'index-to': Number(indexTo),
@@ -410,7 +416,11 @@ export class PochtaService {
         ? ''
         : String(orderIdRaw).trim();
     if (!orderId) {
-      this.logger.error('Pochta backlog create missing result-id');
+      const errors = (created as { errors?: unknown } | undefined)?.errors;
+      this.logger.error(
+        `Pochta backlog create missing result-id` +
+          (errors ? ` errors=${JSON.stringify(errors)}` : ''),
+      );
       throw new ServiceUnavailableException(
         'Служба доставки временно недоступна',
       );

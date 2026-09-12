@@ -22,6 +22,10 @@ import { resolvePublicWebUrl } from '../common/web-origin';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
 import { parseOzonNotification } from './ozon-notification.util';
+import {
+  ozonMerchantExtId,
+  parseOzonMerchantOrderNumber,
+} from './ozon-merchant-ext-id';
 
 export type OzonPaymentLine = {
   extId: string;
@@ -115,6 +119,7 @@ export class PaymentsService {
 
   async createPayment(input: {
     orderId: string;
+    orderNumber: number;
     totalRub: number;
     items: OzonPaymentLine[];
   }): Promise<OzonCreatePaymentResult> {
@@ -131,11 +136,13 @@ export class PaymentsService {
     }
 
     const web = this.publicWebUrl();
+    // Bank statement shows «Оплата по заказу {extId}» — use public number.
+    const merchantExtId = ozonMerchantExtId(input.orderNumber);
     const payload = {
       accessKey,
       amount: { currencyCode: '643', value: totalKop },
       enableFiscalization: false,
-      extId: input.orderId,
+      extId: merchantExtId,
       fiscalizationType: 'FISCAL_TYPE_SINGLE',
       paymentAlgorithm: 'PAY_ALGO_SMS',
       successUrl: `${web}/payment/success?orderId=${encodeURIComponent(input.orderId)}`,
@@ -225,7 +232,9 @@ export class PaymentsService {
       return { status: order.status, paid: false, number: order.number };
     }
 
-    const details = await this.fetchOzonOrderDetails(id);
+    const details =
+      (await this.fetchOzonOrderDetails(ozonMerchantExtId(order.number))) ??
+      (await this.fetchOzonOrderDetails(id));
     if (!details) {
       return { status: order.status, paid: false, number: order.number };
     }
@@ -286,8 +295,13 @@ export class PaymentsService {
   }
 
   /** Fresh pay link for an unpaid order (from Ozon getOrderDetails). */
-  async resolvePayLink(extId: string): Promise<string | null> {
-    const details = await this.fetchOzonOrderDetails(extId);
+  async resolvePayLink(order: {
+    id: string;
+    number: number;
+  }): Promise<string | null> {
+    const details =
+      (await this.fetchOzonOrderDetails(ozonMerchantExtId(order.number))) ??
+      (await this.fetchOzonOrderDetails(order.id));
     if (!details) return null;
     if (this.isPaidStatus(details.status)) return null;
     return details.payLink;
@@ -315,7 +329,7 @@ export class PaymentsService {
         ],
         ...(orderIds?.length ? { id: { in: orderIds } } : {}),
       },
-      select: { id: true },
+      select: { id: true, number: true },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
@@ -335,7 +349,10 @@ export class PaymentsService {
       due.map(async (order) => {
         this.paymentReconcileAt.set(order.id, now);
         try {
-          const details = await this.fetchOzonOrderDetails(order.id);
+          const details =
+            (await this.fetchOzonOrderDetails(
+              ozonMerchantExtId(order.number),
+            )) ?? (await this.fetchOzonOrderDetails(order.id));
           if (!details) return;
           if (!this.isPaidStatus(details.status)) {
             this.logger.log(
@@ -405,34 +422,39 @@ export class PaymentsService {
       );
       return { ok: true };
     }
-    extId = resolved.orderId;
+    const orderId = resolved.orderId;
     ozonId = resolved.ozonId;
+
+    const fetchDetails = async () =>
+      (await this.fetchOzonOrderDetails(
+        ozonMerchantExtId(resolved.number),
+      )) ?? (await this.fetchOzonOrderDetails(orderId));
 
     // Ozon often sends webhooks without a notification secret header (only
     // x-o3-trace). Prefer explicit paid status from the payload; otherwise
     // confirm via getOrderDetails (covers AUTHORIZED → PAID lag).
     if (auth === 'absent') {
       if (status && this.isPaidStatus(status)) {
-        await this.markOrderPaid(extId, ozonId);
+        await this.markOrderPaid(orderId, ozonId);
         return { ok: true };
       }
-      const details = await this.fetchOzonOrderDetails(extId);
+      const details = await fetchDetails();
       if (details && this.isPaidStatus(details.status)) {
-        await this.markOrderPaid(extId, details.id ?? ozonId);
+        await this.markOrderPaid(orderId, details.id ?? ozonId);
       } else {
         this.logger.warn(
-          `Ozon webhook for ${extId}: no signature; API status=${details?.status ?? 'unknown'} webhookStatus=${status ?? 'unknown'}`,
+          `Ozon webhook for ${orderId}: no signature; API status=${details?.status ?? 'unknown'} webhookStatus=${status ?? 'unknown'}`,
         );
       }
       return { ok: true };
     }
 
     if (status && this.isPaidStatus(status)) {
-      await this.markOrderPaid(extId, ozonId);
+      await this.markOrderPaid(orderId, ozonId);
     } else {
-      const details = await this.fetchOzonOrderDetails(extId);
+      const details = await fetchDetails();
       if (details && this.isPaidStatus(details.status)) {
-        await this.markOrderPaid(extId, details.id ?? ozonId);
+        await this.markOrderPaid(orderId, details.id ?? ozonId);
       }
     }
 
@@ -443,29 +465,51 @@ export class PaymentsService {
   private async resolveOrderIdFromNotification(
     extId: string | null,
     ozonId: string | null,
-  ): Promise<{ orderId: string; ozonId: string | null } | null> {
+  ): Promise<{
+    orderId: string;
+    number: number;
+    ozonId: string | null;
+  } | null> {
     if (extId) {
-      const byExt = await this.prisma.order.findUnique({
+      const byId = await this.prisma.order.findUnique({
         where: { id: extId },
-        select: { id: true, paymentExternalId: true },
+        select: { id: true, number: true, paymentExternalId: true },
       });
-      if (byExt) {
+      if (byId) {
         return {
-          orderId: byExt.id,
-          ozonId: ozonId ?? byExt.paymentExternalId,
+          orderId: byId.id,
+          number: byId.number,
+          ozonId: ozonId ?? byId.paymentExternalId,
         };
+      }
+
+      const publicNumber = parseOzonMerchantOrderNumber(extId);
+      if (publicNumber != null) {
+        const byNumber = await this.prisma.order.findFirst({
+          where: { number: publicNumber },
+          select: { id: true, number: true, paymentExternalId: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (byNumber) {
+          return {
+            orderId: byNumber.id,
+            number: byNumber.number,
+            ozonId: ozonId ?? byNumber.paymentExternalId,
+          };
+        }
       }
     }
 
     if (ozonId) {
       const byPay = await this.prisma.order.findFirst({
         where: { paymentExternalId: ozonId },
-        select: { id: true, paymentExternalId: true },
+        select: { id: true, number: true, paymentExternalId: true },
         orderBy: { createdAt: 'desc' },
       });
       if (byPay) {
         return {
           orderId: byPay.id,
+          number: byPay.number,
           ozonId: byPay.paymentExternalId ?? ozonId,
         };
       }

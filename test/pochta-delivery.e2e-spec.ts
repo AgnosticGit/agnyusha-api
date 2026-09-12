@@ -60,6 +60,10 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
       }
 
       if (url.includes('/1.0/user/backlog') && method === 'PUT') {
+        const body = JSON.parse(String(init?.body || '[]')) as Array<{
+          'mail-direct'?: number;
+        }>;
+        expect(body[0]?.['mail-direct']).toBe(643);
         return jsonResponse({ 'result-ids': [9001] });
       }
 
