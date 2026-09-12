@@ -72,6 +72,12 @@ describe('Delivery tracking poll (e2e)', () => {
       }
 
       if (url.includes('/v2/orders') && method === 'POST') {
+        const body = JSON.parse(String(init?.body || '{}')) as {
+          number?: string;
+          packages?: Array<{ items?: Array<{ ware_key?: string }> }>;
+        };
+        expect(body.number).toMatch(/^\d+$/);
+        expect(body.packages?.[0]?.items?.[0]?.ware_key).toMatch(/^TRK-/);
         return jsonResponse({
           entity: { uuid: 'cdek-uuid-1', cdek_number: '1100654321' },
         });
@@ -271,6 +277,10 @@ describe('Delivery tracking poll (e2e)', () => {
       }
 
       if (url.includes('/v2/orders') && method === 'POST') {
+        const body = JSON.parse(String(init?.body || '{}')) as {
+          number?: string;
+        };
+        expect(body.number).toMatch(/^\d+$/);
         return jsonResponse({
           entity: { uuid: 'cdek-after-pay', cdek_number: '998877' },
         });

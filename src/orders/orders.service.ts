@@ -13,6 +13,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { CdekService, cdekTrackingUrl } from '../cdek/cdek.service';
 import { PochtaService, pochtaTrackingUrl } from '../pochta/pochta.service';
+import { carrierItemSku } from './carrier-item-sku';
 import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
 import { ozonTrackingUrl } from '../ozon-delivery/ozon-delivery.util';
 import type { CreateOrderDto } from './dto/create-order.dto';
@@ -37,6 +38,7 @@ const DELIVERY_SYNC_TTL_MS = 3 * 60 * 1000;
 type ResolvedLine = {
   productId: string;
   variantId: string;
+  sku: string;
   productName: string;
   image: string;
   weight: string;
@@ -139,6 +141,7 @@ export class OrdersService {
       resolved.push({
         productId: variant.productId,
         variantId: variant.id,
+        sku: variant.sku,
         productName: variant.product.name,
         image: variant.product.image,
         weight: variant.weight,
@@ -159,7 +162,6 @@ export class OrdersService {
     const deliveryCode = dto.deliveryCode.trim().toUpperCase();
     const pickupCode = dto.pickupCode?.trim() || null;
     const payEnabled = this.payments.isConfigured();
-    let externalDeliveryId: string | null = null;
 
     const lastName = dto.lastName.trim();
     const firstName = dto.firstName.trim();
@@ -234,29 +236,6 @@ export class OrdersService {
           'Оформление через Яндекс Доставку временно недоступно',
         );
       }
-
-      // When Ozon Pay is on, create the Yandex shipment only after payment.
-      if (!payEnabled) {
-        const operatorRequestId = `agny-${Date.now().toString(36)}-${Math.random()
-          .toString(36)
-          .slice(2, 8)}`;
-
-        const yandexOrder = await this.yandex.createPickupOrder({
-          requestId: operatorRequestId,
-          pickupPointId: pickupCode,
-          phone,
-          recipientName,
-          comment: `Заказ Агнюша · ${dto.cityLabel}`,
-          items: resolvedItems.map((item) => ({
-            name: item.productName,
-            article: item.variantId,
-            price: item.price,
-            qty: item.qty,
-            weightGrams: item.weightGrams,
-          })),
-        });
-        externalDeliveryId = yandexOrder.requestId;
-      }
     }
 
     if (deliveryCode === DeliveryMethodCode.CDEK) {
@@ -279,103 +258,6 @@ export class OrdersService {
           'Оформление через Почту России временно недоступно',
         );
       }
-    }
-
-    if (deliveryCode === DeliveryMethodCode.OZON) {
-      if (!pickupCode) {
-        throw new BadRequestException('Выберите пункт выдачи Ozon');
-      }
-      if (!this.ozonDelivery.isOrderCreationConfigured()) {
-        throw new BadRequestException(
-          'Оформление через Ozon Доставку временно недоступно',
-        );
-      }
-    }
-
-    let deliveryTrackNumber: string | null = null;
-    let deliveryTrackingUrl: string | null = null;
-
-    if (
-      deliveryCode === DeliveryMethodCode.CDEK &&
-      pickupCode &&
-      !payEnabled &&
-      this.cdek.isOrderCreationConfigured()
-    ) {
-      const cdekOrder = await this.cdek.createPickupOrder({
-        orderNumber: `agny-${Date.now().toString(36)}`,
-        deliveryPointCode: pickupCode,
-        phone,
-        recipientName,
-        comment: `Заказ Агнюша · ${dto.cityLabel}`,
-        items: resolvedItems.map((item) => ({
-          name: item.productName,
-          wareKey: item.variantId,
-          price: item.price,
-          qty: item.qty,
-          weightGrams: item.weightGrams,
-        })),
-      });
-      externalDeliveryId = cdekOrder.uuid;
-      deliveryTrackNumber = cdekOrder.cdekNumber;
-      deliveryTrackingUrl = cdekOrder.cdekNumber
-        ? cdekTrackingUrl(cdekOrder.cdekNumber)
-        : null;
-    }
-
-    if (
-      deliveryCode === DeliveryMethodCode.POST &&
-      pickupCode &&
-      !payEnabled &&
-      this.pochta.isOrderCreationConfigured()
-    ) {
-      const pochtaOrder = await this.pochta.createPickupOrder({
-        orderNumber: `agny-${Date.now().toString(36)}`,
-        deliveryPointCode: pickupCode,
-        phone,
-        recipientName,
-        lastName,
-        firstName,
-        comment: `Заказ Агнюша · ${dto.cityLabel}`,
-        cityLabel: dto.cityLabel,
-        items: resolvedItems.map((item) => ({
-          name: item.productName,
-          wareKey: item.variantId,
-          price: item.price,
-          qty: item.qty,
-          weightGrams: item.weightGrams,
-        })),
-      });
-      externalDeliveryId = pochtaOrder.orderId;
-      deliveryTrackNumber = pochtaOrder.barcode;
-      deliveryTrackingUrl = pochtaOrder.barcode
-        ? pochtaTrackingUrl(pochtaOrder.barcode)
-        : null;
-    }
-
-    if (
-      deliveryCode === DeliveryMethodCode.OZON &&
-      pickupCode &&
-      !payEnabled &&
-      this.ozonDelivery.isOrderCreationConfigured()
-    ) {
-      const ozonOrder = await this.ozonDelivery.createPickupOrder({
-        orderNumber: `agny-${Date.now().toString(36)}`,
-        deliveryPointCode: pickupCode,
-        phone,
-        recipientName,
-        comment: `Заказ Агнюша · ${dto.cityLabel}`,
-        items: resolvedItems.map((item) => ({
-          name: item.productName,
-          wareKey: item.variantId,
-          price: item.price,
-          qty: item.qty,
-          weightGrams: item.weightGrams,
-        })),
-      });
-      externalDeliveryId = ozonOrder.orderNumber;
-      deliveryTrackNumber = ozonOrder.postingNumber || ozonOrder.orderNumber;
-      deliveryTrackingUrl =
-        ozonOrder.trackingUrl || ozonTrackingUrl(ozonOrder.orderNumber);
     }
 
     const order = await this.prisma.$transaction(async (tx) => {
@@ -410,9 +292,6 @@ export class OrdersService {
           deliveryTitle: dto.deliveryTitle.trim(),
           pickupLabel: dto.pickupLabel?.trim() || null,
           pickupCode,
-          externalDeliveryId,
-          deliveryTrackNumber,
-          deliveryTrackingUrl,
           total,
           items: {
             create: resolvedItems.map((i) => ({
@@ -437,6 +316,131 @@ export class OrdersService {
       });
     });
 
+    let externalDeliveryId: string | null = null;
+    let deliveryTrackNumber: string | null = null;
+    let deliveryTrackingUrl: string | null = null;
+
+    // Without Ozon Pay: create carrier shipment now, using public order number.
+    if (!payEnabled && pickupCode) {
+      try {
+        if (
+          deliveryCode === DeliveryMethodCode.YANDEX &&
+          this.yandex.isOrderCreationConfigured()
+        ) {
+          const yandexOrder = await this.yandex.createPickupOrder({
+            requestId: String(order.number),
+            pickupPointId: pickupCode,
+            phone,
+            recipientName,
+            comment: `Заказ Агнюша · ${dto.cityLabel}`,
+            items: resolvedItems.map((item) => ({
+              name: item.productName,
+              article: carrierItemSku({ sku: item.sku, variantId: item.variantId }),
+              price: item.price,
+              qty: item.qty,
+              weightGrams: item.weightGrams,
+            })),
+          });
+          externalDeliveryId = yandexOrder.requestId;
+        } else if (
+          deliveryCode === DeliveryMethodCode.CDEK &&
+          this.cdek.isOrderCreationConfigured()
+        ) {
+          const cdekOrder = await this.cdek.createPickupOrder({
+            orderNumber: String(order.number),
+            deliveryPointCode: pickupCode,
+            phone,
+            recipientName,
+            comment: `Заказ Агнюша · ${dto.cityLabel}`,
+            items: resolvedItems.map((item) => ({
+              name: item.productName,
+              wareKey: carrierItemSku({ sku: item.sku, variantId: item.variantId }),
+              price: item.price,
+              qty: item.qty,
+              weightGrams: item.weightGrams,
+            })),
+          });
+          externalDeliveryId = cdekOrder.uuid;
+          deliveryTrackNumber = cdekOrder.cdekNumber;
+          deliveryTrackingUrl = cdekOrder.cdekNumber
+            ? cdekTrackingUrl(cdekOrder.cdekNumber)
+            : null;
+        } else if (
+          deliveryCode === DeliveryMethodCode.POST &&
+          this.pochta.isOrderCreationConfigured()
+        ) {
+          const pochtaOrder = await this.pochta.createPickupOrder({
+            orderNumber: String(order.number),
+            deliveryPointCode: pickupCode,
+            phone,
+            recipientName,
+            lastName,
+            firstName,
+            comment: `Заказ Агнюша · ${dto.cityLabel}`,
+            cityLabel: dto.cityLabel,
+            items: resolvedItems.map((item) => ({
+              name: item.productName,
+              wareKey: carrierItemSku({ sku: item.sku, variantId: item.variantId }),
+              price: item.price,
+              qty: item.qty,
+              weightGrams: item.weightGrams,
+            })),
+          });
+          externalDeliveryId = pochtaOrder.orderId;
+          deliveryTrackNumber = pochtaOrder.barcode;
+          deliveryTrackingUrl = pochtaOrder.barcode
+            ? pochtaTrackingUrl(pochtaOrder.barcode)
+            : null;
+        } else if (
+          deliveryCode === DeliveryMethodCode.OZON &&
+          this.ozonDelivery.isOrderCreationConfigured()
+        ) {
+          const ozonOrder = await this.ozonDelivery.createPickupOrder({
+            orderNumber: String(order.number),
+            deliveryPointCode: pickupCode,
+            phone,
+            recipientName,
+            comment: `Заказ Агнюша · ${dto.cityLabel}`,
+            items: resolvedItems.map((item) => ({
+              name: item.productName,
+              wareKey: carrierItemSku({ sku: item.sku, variantId: item.variantId }),
+              price: item.price,
+              qty: item.qty,
+              weightGrams: item.weightGrams,
+            })),
+          });
+          externalDeliveryId = ozonOrder.orderNumber;
+          deliveryTrackNumber = ozonOrder.postingNumber || ozonOrder.orderNumber;
+          deliveryTrackingUrl =
+            ozonOrder.trackingUrl || ozonTrackingUrl(ozonOrder.orderNumber);
+        }
+      } catch (err) {
+        await this.prisma.$transaction(async (tx) => {
+          await this.restoreStock(tx, order.items);
+          await tx.orderItem.deleteMany({ where: { orderId: order.id } });
+          await tx.order.delete({ where: { id: order.id } });
+        });
+        throw err;
+      }
+
+      if (externalDeliveryId) {
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            externalDeliveryId,
+            deliveryTrackNumber,
+            deliveryTrackingUrl,
+          },
+        });
+      }
+    }
+
+    const orderWithDelivery = {
+      ...order,
+      externalDeliveryId,
+      deliveryTrackNumber,
+      deliveryTrackingUrl,
+    };
     const clearOrderedFromCart = async () => {
       try {
         await this.cart.removeVariants({
@@ -470,7 +474,7 @@ export class OrdersService {
         })),
       });
       await clearOrderedFromCart();
-      return this.map(order);
+      return this.map(orderWithDelivery);
     }
 
     try {

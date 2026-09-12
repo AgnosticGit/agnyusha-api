@@ -26,6 +26,12 @@ export type DeliveryAvailability = DeliveryMethodRow & {
   note?: string;
 };
 
+/** Shown in checkout but not selectable until re-enabled. */
+const BLOCKED_DELIVERY_CODES = new Set<DeliveryMethodCode>([
+  'PICKUP',
+  'OZON',
+]);
+
 /** Pure location → availability mapping (unit-tested). */
 export function mapDeliveryAvailability(
   methods: DeliveryMethodRow[],
@@ -41,18 +47,20 @@ export function mapDeliveryAvailability(
 ): DeliveryAvailability[] {
   const { region, label } = input;
   if (!region && !label) {
-    return methods.map((m) => ({ ...m, available: false }));
+    return sortDeliveryMethods(
+      methods.map((m) => ({ ...m, available: false })),
+    );
   }
 
-  const local = isLocalArea(region, label);
-  return methods.map((m) => {
-    if (m.code === 'PICKUP') {
+  const mapped = methods.map((m) => {
+    if (BLOCKED_DELIVERY_CODES.has(m.code)) {
       return {
         ...m,
-        available: local,
-        note: local
-          ? 'Самовывоз из пункта в Ленинградской области'
-          : 'Самовывоз доступен только для СПб и ЛО',
+        available: false,
+        note:
+          m.code === 'PICKUP'
+            ? 'Самовывоз временно недоступен'
+            : 'Ozon Доставка временно недоступна',
       };
     }
     if (m.code === 'CDEK') {
@@ -87,19 +95,23 @@ export function mapDeliveryAvailability(
           : 'Почта России временно недоступна',
       };
     }
-    if (m.code === 'OZON') {
-      return {
-        ...m,
-        available: input.ozonReady,
-        note: input.ozonReady
-          ? 'Выберите пункт выдачи Ozon'
-          : 'Ozon Доставка временно недоступна',
-      };
-    }
     return {
       ...m,
       available: true,
       note: 'Доставка по всей России',
     };
+  });
+
+  return sortDeliveryMethods(mapped);
+}
+
+/** Keep blocked methods at the end; preserve relative order otherwise. */
+function sortDeliveryMethods(
+  methods: DeliveryAvailability[],
+): DeliveryAvailability[] {
+  return [...methods].sort((a, b) => {
+    const aBlocked = BLOCKED_DELIVERY_CODES.has(a.code) ? 1 : 0;
+    const bBlocked = BLOCKED_DELIVERY_CODES.has(b.code) ? 1 : 0;
+    return aBlocked - bBlocked;
   });
 }

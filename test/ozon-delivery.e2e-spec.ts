@@ -91,7 +91,7 @@ describe('Ozon Delivery (e2e, mocked)', () => {
     });
   });
 
-  it('marks OZON available when configured', async () => {
+  it('keeps OZON unavailable while blocked', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/delivery-methods')
       .query({
@@ -101,6 +101,7 @@ describe('Ozon Delivery (e2e, mocked)', () => {
       .expect(200);
 
     const ozon = res.body.find((m: { code: string }) => m.code === 'OZON');
-    expect(ozon?.available).toBe(true);
+    expect(ozon?.available).toBe(false);
+    expect(ozon?.note).toMatch(/временно/i);
   });
 });

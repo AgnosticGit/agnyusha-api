@@ -77,6 +77,13 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
       }
 
       if (url.includes('/offers/create') && method === 'POST') {
+        const body = JSON.parse(String(init?.body || '{}')) as {
+          info?: { operator_request_id?: string };
+          items?: Array<{ article?: string }>;
+        };
+        expect(body.info?.operator_request_id).toMatch(/^\d+$/);
+        expect(body.items?.[0]?.article).toBeTruthy();
+        expect(body.items?.[0]?.article).not.toMatch(/^cm[a-z0-9]{20,}$/i);
         return jsonResponse({
           offers: [
             {

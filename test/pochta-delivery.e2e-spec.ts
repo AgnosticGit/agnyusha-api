@@ -62,8 +62,13 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
       if (url.includes('/1.0/user/backlog') && method === 'PUT') {
         const body = JSON.parse(String(init?.body || '[]')) as Array<{
           'mail-direct'?: number;
+          'tel-address'?: number;
+          'order-num'?: string;
         }>;
         expect(body[0]?.['mail-direct']).toBe(643);
+        // 10-digit national — ЛК mis-formats 11-digit 7… as +7 (7XX)…
+        expect(body[0]?.['tel-address']).toBe(9001234567);
+        expect(body[0]?.['order-num']).toMatch(/^\d+$/);
         return jsonResponse({ 'result-ids': [9001] });
       }
 
@@ -226,6 +231,10 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
         });
       }
       if (url.includes('/1.0/user/backlog') && method === 'PUT') {
+        const body = JSON.parse(String(init?.body || '[]')) as Array<{
+          'order-num'?: string;
+        }>;
+        expect(body[0]?.['order-num']).toMatch(/^\d+$/);
         return jsonResponse({ 'result-ids': [9002] });
       }
       if (url.includes('/1.0/user/shipment') && method === 'POST') {

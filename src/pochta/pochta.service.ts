@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Inject,
   Injectable,
   Logger,
@@ -7,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { readErrorBody, sanitizeSearchName } from '../common/http-utils';
 import { PochtaEntityNotFoundError } from './pochta.errors';
+import { pochtaTelAddress } from './pochta-phone.util';
 import { POCHTA_FETCH, type PochtaFetch } from './pochta.tokens';
 
 type PochtaOfficeSchedule = {
@@ -355,11 +357,10 @@ export class PochtaService {
       100,
       input.items.reduce((sum, i) => sum + i.weightGrams * i.qty, 0),
     );
-    const phoneDigits = input.phone.replace(/\D/g, '');
-    const phone =
-      phoneDigits.length >= 10
-        ? `+${phoneDigits.replace(/^8/, '7')}`
-        : input.phone;
+    const phone = pochtaTelAddress(input.phone);
+    if (phone == null) {
+      throw new BadRequestException('Укажите корректный телефон получателя');
+    }
 
     const surname =
       input.lastName?.trim() ||

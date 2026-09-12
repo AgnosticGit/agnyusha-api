@@ -57,9 +57,10 @@ describe('delivery-availability', () => {
       yandexMoscowOnly: false,
     });
     expect(rows.every((r) => r.available === false)).toBe(true);
+    expect(rows.map((r) => r.code).slice(-2)).toEqual(['PICKUP', 'OZON']);
   });
 
-  it('enables pickup only for Spb/LO', () => {
+  it('keeps PICKUP and OZON blocked and last', () => {
     const local = mapDeliveryAvailability(methods, {
       region: 'Санкт-Петербург',
       label: 'СПб',
@@ -69,8 +70,15 @@ describe('delivery-availability', () => {
       yandexOrderReady: true,
       yandexMoscowOnly: false,
     });
-    expect(local.find((m) => m.code === 'PICKUP')?.available).toBe(true);
-    expect(local.find((m) => m.code === 'OZON')?.available).toBe(true);
+    expect(local.find((m) => m.code === 'PICKUP')?.available).toBe(false);
+    expect(local.find((m) => m.code === 'OZON')?.available).toBe(false);
+    expect(local.map((m) => m.code)).toEqual([
+      'CDEK',
+      'YANDEX',
+      'POST',
+      'PICKUP',
+      'OZON',
+    ]);
 
     const remote = mapDeliveryAvailability(methods, {
       region: 'Казань',

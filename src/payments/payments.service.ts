@@ -26,6 +26,7 @@ import {
   ozonMerchantExtId,
   parseOzonMerchantOrderNumber,
 } from './ozon-merchant-ext-id';
+import { carrierItemSku } from '../orders/carrier-item-sku';
 
 export type OzonPaymentLine = {
   extId: string;
@@ -576,7 +577,7 @@ export class PaymentsService {
     const order = await this.prisma.order.findUnique({
       where: { id: extId },
       include: {
-        items: true,
+        items: { include: { variant: { select: { sku: true } } } },
         user: { select: { emailVerifiedAt: true } },
       },
     });
@@ -603,14 +604,18 @@ export class PaymentsService {
     ) {
       try {
         const yandexOrder = await this.yandex.createPickupOrder({
-          requestId: `agny-pay-${order.id.slice(-10)}-${Date.now().toString(36)}`,
+          requestId: String(order.number),
           pickupPointId: order.pickupCode,
           phone: order.phone,
           recipientName: formatPersonName(order),
           comment: `Заказ Агнюша · ${order.cityLabel}`,
           items: order.items.map((item) => ({
             name: item.productName,
-            article: item.variantId ?? item.id,
+            article: carrierItemSku({
+              sku: item.variant?.sku,
+              variantId: item.variantId,
+              id: item.id,
+            }),
             price: item.price,
             qty: item.qty,
             weightGrams: resolveWeightGrams(item.weightGrams, item.weight),
@@ -639,14 +644,18 @@ export class PaymentsService {
     ) {
       try {
         const cdekOrder = await this.cdek.createPickupOrder({
-          orderNumber: `agny-pay-${order.id.slice(-12)}`,
+          orderNumber: String(order.number),
           deliveryPointCode: order.pickupCode,
           phone: order.phone,
           recipientName: formatPersonName(order),
           comment: `Заказ Агнюша · ${order.cityLabel}`,
           items: order.items.map((item) => ({
             name: item.productName,
-            wareKey: item.variantId ?? item.id,
+            wareKey: carrierItemSku({
+              sku: item.variant?.sku,
+              variantId: item.variantId,
+              id: item.id,
+            }),
             price: item.price,
             qty: item.qty,
             weightGrams: resolveWeightGrams(item.weightGrams, item.weight),
@@ -679,7 +688,7 @@ export class PaymentsService {
     ) {
       try {
         const pochtaOrder = await this.pochta.createPickupOrder({
-          orderNumber: `agny-pay-${order.id.slice(-12)}`,
+          orderNumber: String(order.number),
           deliveryPointCode: order.pickupCode,
           phone: order.phone,
           recipientName: formatPersonName(order),
@@ -689,7 +698,11 @@ export class PaymentsService {
           cityLabel: order.cityLabel,
           items: order.items.map((item) => ({
             name: item.productName,
-            wareKey: item.variantId ?? item.id,
+            wareKey: carrierItemSku({
+              sku: item.variant?.sku,
+              variantId: item.variantId,
+              id: item.id,
+            }),
             price: item.price,
             qty: item.qty,
             weightGrams: resolveWeightGrams(item.weightGrams, item.weight),
@@ -722,14 +735,18 @@ export class PaymentsService {
     ) {
       try {
         const ozonOrder = await this.ozonDelivery.createPickupOrder({
-          orderNumber: `agny-pay-${order.id.slice(-12)}`,
+          orderNumber: String(order.number),
           deliveryPointCode: order.pickupCode,
           phone: order.phone,
           recipientName: formatPersonName(order),
           comment: `Заказ Агнюша · ${order.cityLabel}`,
           items: order.items.map((item) => ({
             name: item.productName,
-            wareKey: item.variantId ?? item.id,
+            wareKey: carrierItemSku({
+              sku: item.variant?.sku,
+              variantId: item.variantId,
+              id: item.id,
+            }),
             price: item.price,
             qty: item.qty,
             weightGrams: resolveWeightGrams(item.weightGrams, item.weight),

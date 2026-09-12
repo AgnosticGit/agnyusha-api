@@ -42,7 +42,7 @@ describe('Delivery methods (e2e)', () => {
         m.available,
       ]),
     );
-    expect(byCode.PICKUP).toBe(true);
+    expect(byCode.PICKUP).toBe(false);
     expect(byCode.COURIER).toBeUndefined();
     expect(byCode.CDEK).toBe(true);
     expect(byCode.YANDEX).toBe(false);
@@ -51,8 +51,8 @@ describe('Delivery methods (e2e)', () => {
     expect(local.body.map((m: { code: string }) => m.code)).toEqual([
       'CDEK',
       'YANDEX',
-      'OZON',
       'POST',
+      'OZON',
       'PICKUP',
     ]);
 
