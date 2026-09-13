@@ -1,35 +1,30 @@
 # Production deploy (VPS + Docker Compose + Caddy)
 
-Deploy path on the server: `/opt/agnyusha`.
+Deploy path: `/opt/agnyusha`.
 
-## One-time server setup
-
-1. VPS with Docker + Compose plugin, ports 80/443 open.
-2. Copy `deploy/*` to `/opt/agnyusha`, create `.env` from `.env.example`.
-3. `docker login ghcr.io` on the server (PAT with `read:packages`).
-4. `chmod +x compose-up.sh && ./compose-up.sh`
-5. Point DNS A-record when ready; switch `Caddyfile` → `Caddyfile.prod` and set `DOMAIN`.
+Non-secret config (API URLs, warehouse IDs, `PUBLIC_WEB_URL`, etc.) lives in `deploy/.env.example` / server `.env`.  
+GitHub Actions upserts **secrets only**.
 
 ## Auto-deploy (push to `main`)
 
-| Repo | Image | Workflow |
-|------|-------|----------|
-| `agnyusha-api` | `ghcr.io/agnosticgit/agnyusha-api` | build + sync deploy + restart |
-| `agnyusha-web` | `ghcr.io/agnosticgit/agnyusha-web` | build + restart `web` |
+| Repo | Image |
+|------|-------|
+| `agnyusha-api` | `ghcr.io/agnosticgit/agnyusha-api` |
+| `agnyusha-web` | `ghcr.io/agnosticgit/agnyusha-web` |
 
-Settings → Actions → General → Workflow permissions → **Read and write** (both repos).
+Settings → Actions → General → Workflow permissions → **Read and write**.
 
-### Secrets — both repos
+### Repository secrets — both repos
 
 | Name | Notes |
 |------|--------|
-| `SSH_HOST` | e.g. `89.111.171.128` |
+| `SSH_HOST` | `89.111.171.128` |
 | `SSH_USER` | `root` |
-| `SSH_KEY` | Private key contents (`~/.ssh/agnyusha_deploy`) |
-| `SSH_PORT` | Optional, default `22` |
-| `GHCR_TOKEN` | PAT with `read:packages` (server pulls images) |
+| `SSH_KEY` | private key (`~/.ssh/agnyusha_deploy`) |
+| `SSH_PORT` | optional (`22`) |
+| `GHCR_TOKEN` | PAT with `read:packages` |
 
-### Secrets — `agnyusha-api` only
+### Repository secrets — `agnyusha-api` only
 
 | Name |
 |------|
@@ -46,35 +41,6 @@ Settings → Actions → General → Workflow permissions → **Read and write**
 | `OZON_DELIVERY_CLIENT_ID` |
 | `OZON_DELIVERY_CLIENT_SECRET` |
 
-### Variables — both repos
+No Repository **Variables** required.
 
-| Name | Notes |
-|------|--------|
-| `GHCR_USERNAME` | GitHub username / org that owns packages (e.g. `AgnosticGit`) |
-
-### Variables — `agnyusha-api`
-
-| Name | Example until domain |
-|------|----------------------|
-| `PUBLIC_WEB_URL` | `http://89.111.171.128` |
-| `CORS_ORIGIN` | `http://89.111.171.128` |
-| `GOOGLE_CALLBACK_URL` | `http://89.111.171.128/api/auth/google/callback` |
-| `GOOGLE_CLIENT_ID` | from Google Cloud |
-| `MAIL_FROM` | `Agnyusha <onboarding@resend.dev>` |
-| `CDEK_API_URL` | `https://api.cdek.ru` |
-| `CDEK_FROM_LOCATION` | warehouse / PVZ code |
-| `CDEK_TARIFF_CODE` | `136` |
-| `YANDEX_DELIVERY_API_URL` | `https://b2b-authproxy.taxi.yandex.net` |
-| `YANDEX_PLATFORM_STATION_ID` | station UUID |
-| `POCHTA_API_URL` | `https://otpravka-api.pochta.ru` |
-| `POCHTA_FROM_INDEX` | sender index |
-| `POCHTA_MAIL_TYPE` | `ONLINE_PARCEL` |
-| `OZON_PAY_API_URL` | `https://payapi.ozon.ru/v1` |
-| `OZON_DELIVERY_API_URL` | `https://api-delivery.ozon.ru` |
-| `OZON_DELIVERY_SHIPMENT_METHOD_ID` | from Ozon cabinet |
-
-### Variables — `agnyusha-web`
-
-| Name | Notes |
-|------|--------|
-| `SITE_URL` | Public URL baked into Next build (`http://89.111.171.128` until domain) |
+When you get a domain: edit `/opt/agnyusha/.env` (`PUBLIC_*`, `CORS_*`, `GOOGLE_CALLBACK_URL`), switch to `Caddyfile.prod`, and change `NEXT_PUBLIC_SITE_URL` in the web workflow build-arg.
