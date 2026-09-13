@@ -11,6 +11,10 @@ import {
   readErrorBody,
   sanitizeSearchName,
 } from '../common/http-utils';
+import {
+  etaFromIsoInterval,
+  type DeliveryEta,
+} from '../delivery/delivery-eta';
 import { YANDEX_FETCH, type YandexFetch } from './yandex.tokens';
 import {
   YandexEntityNotFoundError,
@@ -181,6 +185,27 @@ function normalizeRuPhone(phone: string): string {
   return digits;
 }
 
+/** offers/info may return ISO strings or unix seconds/ms. */
+export function normalizeYandexTime(
+  value: string | number | null | undefined,
+): string | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const ms = value < 1e12 ? value * 1000 : value;
+    return new Date(ms).toISOString();
+  }
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    const ms = n < 1e12 ? n * 1000 : n;
+    return new Date(ms).toISOString();
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 @Injectable()
 export class YandexDeliveryService {
   private readonly logger = new Logger(YandexDeliveryService.name);
@@ -349,6 +374,130 @@ export class YandexDeliveryService {
       });
     }
     return points;
+  }
+
+  /**
+   * Approximate ETA to a city via offers/info (address, then a few PVZ).
+   * Failures return null — never throw to callers.
+   */
+  async estimateDeliveryEta(
+    geoId: number,
+    options?: { fullAddress?: string },
+  ): Promise<DeliveryEta | null> {
+    if (!this.isOrderCreationConfigured()) return null;
+    if (!Number.isInteger(geoId) || geoId < 1) return null;
+
+    try {
+      const address = options?.fullAddress?.trim();
+      if (address) {
+        const byAddress = await this.fetchOffersInfoEta({
+          full_address: address,
+        });
+        if (byAddress.eta) return byAddress.eta;
+        // Warehouse has no pickup schedule — PVZ retries will fail the same way.
+        if (byAddress.fatal) return null;
+      }
+
+      const points = await this.deliveryPoints(geoId);
+      for (const point of points.slice(0, 8)) {
+        const pickupId = point.code?.trim();
+        if (!pickupId) continue;
+        const byPvz = await this.fetchOffersInfoEta({
+          self_pickup_id: pickupId,
+          last_mile_policy: 'self_pickup',
+        });
+        if (byPvz.eta) return byPvz.eta;
+        if (byPvz.fatal) return null;
+      }
+      return null;
+    } catch (err) {
+      this.logger.warn(
+        `Yandex estimateDeliveryEta failed geoId=${geoId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async fetchOffersInfoEta(query: {
+    full_address?: string;
+    self_pickup_id?: string;
+    last_mile_policy?: string;
+  }): Promise<{ eta: DeliveryEta | null; fatal: boolean }> {
+    const params = new URLSearchParams({
+      station_id: this.platformStationId,
+    });
+    if (query.full_address) params.set('full_address', query.full_address);
+    if (query.self_pickup_id) {
+      params.set('self_pickup_id', query.self_pickup_id);
+    }
+    if (query.last_mile_policy) {
+      params.set('last_mile_policy', query.last_mile_policy);
+    }
+
+    const path = `/api/b2b/platform/offers/info?${params.toString()}`;
+    const res = await this.fetchFn(`${this.baseUrl}${path}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      const detail = await this.readErrorBody(res);
+      this.logger.warn(
+        `Yandex offers/info ${res.status}${detail ? `: ${detail}` : ''}`,
+      );
+      const fatal =
+        detail.includes('pickups_not_configured') ||
+        detail.includes('Pickups are not configured');
+      return { eta: null, fatal };
+    }
+
+    const data = (await res.json()) as {
+      offers?: Array<{
+        from?: string | number;
+        to?: string | number;
+        delivery_interval?: {
+          min?: string | number;
+          max?: string | number;
+          from?: string | number;
+          to?: string | number;
+        };
+        offer_details?: {
+          delivery_interval?: {
+            min?: string | number;
+            max?: string | number;
+            from?: string | number;
+            to?: string | number;
+          };
+        };
+      }>;
+    };
+
+    const offers = data.offers || [];
+    if (!offers.length) return { eta: null, fatal: false };
+
+    // Use earliest and latest offer window as city ETA range.
+    let minIso: string | null = null;
+    let maxIso: string | null = null;
+    for (const offer of offers) {
+      const interval =
+        offer.offer_details?.delivery_interval || offer.delivery_interval;
+      const from = normalizeYandexTime(
+        offer.from ?? interval?.min ?? interval?.from,
+      );
+      const to = normalizeYandexTime(
+        offer.to ?? interval?.max ?? interval?.to,
+      );
+      if (from && (!minIso || from < minIso)) minIso = from;
+      if (to && (!maxIso || to > maxIso)) maxIso = to;
+      if (from && !to && (!maxIso || from > maxIso)) maxIso = from;
+      if (to && !from && (!minIso || to < minIso)) minIso = to;
+    }
+    return { eta: etaFromIsoInterval(minIso, maxIso), fatal: false };
   }
 
   async getRequestInfo(requestId: string): Promise<{

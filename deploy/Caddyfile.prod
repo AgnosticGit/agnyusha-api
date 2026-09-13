@@ -1,0 +1,19 @@
+# TLS via Let's Encrypt — requires DNS A record for DOMAIN → VPS IP.
+# Copy over Caddyfile and set DOMAIN=your.domain in .env, then:
+#   docker compose up -d caddy
+
+{$DOMAIN} {
+	encode gzip zstd
+
+	handle /api* {
+		reverse_proxy api:3001
+	}
+
+	handle /uploads* {
+		reverse_proxy api:3001
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

@@ -7,6 +7,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readErrorBody, sanitizeSearchName } from '../common/http-utils';
+import {
+  etaFromDayRange,
+  type DeliveryEta,
+} from '../delivery/delivery-eta';
 import { PochtaEntityNotFoundError } from './pochta.errors';
 import { pochtaTelAddress } from './pochta-phone.util';
 import { POCHTA_FETCH, type PochtaFetch } from './pochta.tokens';
@@ -96,6 +100,27 @@ export class PochtaService {
     return (
       this.config.get<string>('POCHTA_MAIL_CATEGORY')?.trim() || 'ORDINARY'
     );
+  }
+
+  private get mailDirect(): number {
+    const n = Number(
+      this.config.get<string>('POCHTA_MAIL_DIRECT')?.trim() || '643',
+    );
+    return Number.isFinite(n) ? n : 643;
+  }
+
+  /** Tariff object id for public calculator fallback (Посылка онлайн). */
+  private get tariffObject(): number {
+    const raw = this.config.get<string>('POCHTA_TARIFF_OBJECT')?.trim();
+    const n = raw ? Number(raw) : NaN;
+    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+    const byType: Record<string, number> = {
+      ONLINE_PARCEL: 23030,
+      POSTAL_PARCEL: 4030,
+      ONLINE_COURIER: 24030,
+      EMS: 7020,
+    };
+    return byType[this.mailType] ?? 23030;
   }
 
   isConfigured() {
@@ -314,6 +339,129 @@ export class PochtaService {
     };
   }
 
+  /**
+   * Approximate ETA to a settlement via first OPS index + Otpravka tariff
+   * (fallback: public tariff.pochta.ru). Failures return null.
+   */
+  async estimateDeliveryEta(input: {
+    settlement?: string;
+    region?: string;
+    toIndex?: string;
+    weightGrams?: number;
+  }): Promise<DeliveryEta | null> {
+    if (!this.isOrderCreationConfigured()) return null;
+    const weight = Math.max(
+      100,
+      Math.min(Math.trunc(input.weightGrams ?? 1000) || 1000, 30_000),
+    );
+
+    try {
+      let toIndex = input.toIndex?.trim() || '';
+      if (!/^\d{5,6}$/.test(toIndex)) {
+        const settlement = sanitizeSearchName(input.settlement ?? '', 120);
+        if (settlement.length < 2) return null;
+        const region = sanitizeSearchName(input.region ?? '', 120);
+        const codes = await this.request<string[]>(
+          'GET',
+          'postoffice/1.0/settlement.offices.codes',
+          {
+            query: {
+              settlement,
+              region: region || undefined,
+            },
+          },
+        );
+        toIndex =
+          (Array.isArray(codes) ? codes : [])
+            .map((c) => String(c).trim())
+            .find((c) => /^\d{5,6}$/.test(c)) || '';
+      }
+      if (!/^\d{5,6}$/.test(toIndex)) return null;
+
+      const fromOtpravka = await this.estimateViaOtpravkaTariff(toIndex, weight);
+      if (fromOtpravka) return fromOtpravka;
+      return this.estimateViaPublicTariff(toIndex, weight);
+    } catch (err) {
+      this.logger.warn(
+        `Pochta estimateDeliveryEta failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async estimateViaOtpravkaTariff(
+    toIndex: string,
+    weightGrams: number,
+  ): Promise<DeliveryEta | null> {
+    try {
+      const data = await this.request<{
+        'delivery-time'?: { 'min-days'?: number; 'max-days'?: number };
+        delivery?: { min?: number; max?: number };
+      }>('POST', '1.0/tariff', {
+        body: {
+          'index-from': this.fromIndex,
+          'index-to': toIndex,
+          'mail-type': this.mailType,
+          'mail-category': this.mailCategory,
+          'mail-direct': this.mailDirect,
+          mass: weightGrams,
+        },
+      });
+      const min =
+        data?.['delivery-time']?.['min-days'] ?? data?.delivery?.min;
+      const max =
+        data?.['delivery-time']?.['max-days'] ?? data?.delivery?.max;
+      return etaFromDayRange(min, max);
+    } catch (err) {
+      this.logger.warn(
+        `Pochta Otpravka tariff ETA failed to=${toIndex}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async estimateViaPublicTariff(
+    toIndex: string,
+    weightGrams: number,
+  ): Promise<DeliveryEta | null> {
+    const url = new URL(
+      'https://tariff.pochta.ru/v2/calculate/tariff/delivery',
+    );
+    url.searchParams.set('json', '');
+    url.searchParams.set('object', String(this.tariffObject));
+    url.searchParams.set('from', this.fromIndex);
+    url.searchParams.set('to', toIndex);
+    url.searchParams.set('weight', String(weightGrams));
+
+    try {
+      const res = await this.fetchFn(url.toString(), {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        this.logger.warn(
+          `Pochta public tariff failed status=${res.status} to=${toIndex}`,
+        );
+        return null;
+      }
+      const data = (await res.json()) as {
+        delivery?: { min?: number; max?: number };
+      };
+      return etaFromDayRange(data.delivery?.min, data.delivery?.max);
+    } catch (err) {
+      this.logger.warn(
+        `Pochta public tariff ETA failed to=${toIndex}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
+  }
+
   async createPickupOrder(input: {
     orderNumber: string;
     deliveryPointCode: string;
@@ -379,16 +527,14 @@ export class PochtaService {
     const addressSource = (office['address-source'] || '').trim();
 
     // ISO 3166-1 numeric country code — required by Otpravka (643 = Russia).
-    const mailDirect = Number(
-      this.config.get<string>('POCHTA_MAIL_DIRECT')?.trim() || '643',
-    );
+    const mailDirect = this.mailDirect;
 
     const backlogBody = [
       {
         'address-type-to': 'DEFAULT',
         'mail-category': this.mailCategory,
         'mail-type': this.mailType,
-        'mail-direct': Number.isFinite(mailDirect) ? mailDirect : 643,
+        'mail-direct': mailDirect,
         mass,
         'order-num': input.orderNumber.slice(0, 20),
         'index-to': Number(indexTo),

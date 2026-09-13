@@ -20,6 +20,34 @@ export class DeliveryMethodsQueryDto {
   @IsString()
   @MaxLength(300)
   label?: string;
+
+  /** CDEK city code — enables ETA for СДЭК. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cdekCode?: number;
+
+  /** Yandex geo_id — enables ETA for Яндекс. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  yandexGeoId?: number;
+
+  /** Settlement name for Почта (defaults to city from label). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  settlement?: string;
+
+  /** Package weight for calculators (grams). Default 1000. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(100)
+  @Max(30000)
+  weightGrams?: number;
 }
 
 export class DeliveryPointsQueryDto {

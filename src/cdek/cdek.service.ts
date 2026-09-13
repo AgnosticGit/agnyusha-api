@@ -12,6 +12,10 @@ import {
 } from '../common/http-utils';
 import { CDEK_FETCH, type CdekFetch } from './cdek.tokens';
 import { CdekEntityNotFoundError } from './cdek.errors';
+import {
+  etaFromDayRange,
+  type DeliveryEta,
+} from '../delivery/delivery-eta';
 
 type TokenCache = {
   accessToken: string;
@@ -31,6 +35,7 @@ type CdekDeliveryPoint = {
   status?: string;
   location?: {
     city?: string;
+    city_code?: number;
     region?: string;
     address?: string;
     postal_code?: string;
@@ -45,6 +50,15 @@ type CdekDeliveryPoint = {
   allowed_cod?: boolean;
   is_handout?: boolean;
   take_only?: boolean;
+};
+
+type CdekCalculatorResponse = {
+  delivery_sum?: number;
+  period_min?: number;
+  period_max?: number;
+  calendar_min?: number;
+  calendar_max?: number;
+  errors?: unknown[];
 };
 
 function mapSuggestCity(row: CdekSuggestCity) {
@@ -67,6 +81,8 @@ function mapSuggestCity(row: CdekSuggestCity) {
 export class CdekService {
   private readonly logger = new Logger(CdekService.name);
   private tokenCache: TokenCache | null = null;
+  /** Cached city_code for CDEK_FROM_LOCATION; undefined = not resolved yet. */
+  private fromCityCodeCache: number | null | undefined = undefined;
 
   constructor(
     private readonly config: ConfigService,
@@ -95,6 +111,88 @@ export class CdekService {
   /** Test helper: drop cached OAuth token between cases. */
   clearTokenCache() {
     this.tokenCache = null;
+    this.fromCityCodeCache = undefined;
+  }
+
+  private get fromCityCodeOverride(): number | null {
+    const raw = this.config.get<string>('CDEK_FROM_CITY_CODE')?.trim();
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+  }
+
+  /** Resolve warehouse city code for tariff calculator. */
+  async resolveFromCityCode(): Promise<number | null> {
+    const override = this.fromCityCodeOverride;
+    if (override) return override;
+    if (this.fromCityCodeCache !== undefined) return this.fromCityCodeCache;
+    if (!this.fromLocation) {
+      this.fromCityCodeCache = null;
+      return null;
+    }
+    try {
+      const rows = await this.cdekGet<CdekDeliveryPoint[]>('/deliverypoints', {
+        code: this.fromLocation,
+      });
+      const code = rows?.[0]?.location?.city_code;
+      this.fromCityCodeCache =
+        typeof code === 'number' && Number.isFinite(code) && code > 0
+          ? Math.trunc(code)
+          : null;
+    } catch (err) {
+      this.logger.warn(
+        `CDEK resolveFromCityCode failed for ${this.fromLocation}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      this.fromCityCodeCache = null;
+    }
+    return this.fromCityCodeCache;
+  }
+
+  /**
+   * Approximate delivery period to a city (warehouse→PVZ tariff).
+   * Failures return null — never throw to callers.
+   */
+  async estimateDeliveryEta(
+    toCityCode: number,
+    weightGrams = 1000,
+  ): Promise<DeliveryEta | null> {
+    if (!this.isConfigured() || !this.fromLocation) return null;
+    if (!Number.isInteger(toCityCode) || toCityCode < 1) return null;
+    const weight = Math.max(100, Math.min(Math.trunc(weightGrams) || 1000, 30_000));
+
+    try {
+      const fromCode = await this.resolveFromCityCode();
+      if (!fromCode) return null;
+
+      const data = await this.cdekPost<CdekCalculatorResponse>(
+        '/calculator/tariff',
+        {
+          type: 1,
+          tariff_code: this.tariffCode,
+          from_location: { code: fromCode },
+          to_location: { code: toCityCode },
+          packages: [{ weight }],
+        },
+      );
+
+      const min =
+        typeof data.calendar_min === 'number'
+          ? data.calendar_min
+          : data.period_min;
+      const max =
+        typeof data.calendar_max === 'number'
+          ? data.calendar_max
+          : data.period_max;
+      return etaFromDayRange(min, max);
+    } catch (err) {
+      this.logger.warn(
+        `CDEK estimateDeliveryEta failed toCity=${toCityCode}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
   }
 
   /** Health probe: obtain (or refresh) OAuth token. */

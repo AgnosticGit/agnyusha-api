@@ -23,7 +23,14 @@ export class DeliveryController {
 
   @Get('delivery-methods')
   list(@Query() query: DeliveryMethodsQueryDto) {
-    return this.deliveryService.forLocation(query.region, query.label);
+    return this.deliveryService.forLocation({
+      region: query.region,
+      label: query.label,
+      cdekCode: query.cdekCode,
+      yandexGeoId: query.yandexGeoId,
+      settlement: query.settlement,
+      weightGrams: query.weightGrams,
+    });
   }
 
   @Get('cdek/delivery-points')

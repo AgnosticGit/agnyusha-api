@@ -1,0 +1,158 @@
+name: Deploy API
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/agnosticgit/agnyusha-api
+  DEPLOY_PATH: /opt/agnyusha
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sync deploy configs
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "deploy/docker-compose.yml,deploy/Caddyfile,deploy/Caddyfile.prod,deploy/compose-up.sh,deploy/README.md,deploy/.env.example"
+          target: ${{ env.DEPLOY_PATH }}
+          strip_components: 1
+
+      - name: Pull and restart stack
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          # Non-secret URLs / flags (Variables)
+          PUBLIC_WEB_URL: ${{ vars.PUBLIC_WEB_URL }}
+          CORS_ORIGIN: ${{ vars.CORS_ORIGIN }}
+          GOOGLE_CALLBACK_URL: ${{ vars.GOOGLE_CALLBACK_URL }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          CDEK_API_URL: ${{ vars.CDEK_API_URL }}
+          CDEK_FROM_LOCATION: ${{ vars.CDEK_FROM_LOCATION }}
+          CDEK_TARIFF_CODE: ${{ vars.CDEK_TARIFF_CODE }}
+          YANDEX_DELIVERY_API_URL: ${{ vars.YANDEX_DELIVERY_API_URL }}
+          YANDEX_PLATFORM_STATION_ID: ${{ vars.YANDEX_PLATFORM_STATION_ID }}
+          POCHTA_API_URL: ${{ vars.POCHTA_API_URL }}
+          POCHTA_FROM_INDEX: ${{ vars.POCHTA_FROM_INDEX }}
+          POCHTA_MAIL_TYPE: ${{ vars.POCHTA_MAIL_TYPE }}
+          MAIL_FROM: ${{ vars.MAIL_FROM }}
+          OZON_PAY_API_URL: ${{ vars.OZON_PAY_API_URL }}
+          OZON_DELIVERY_API_URL: ${{ vars.OZON_DELIVERY_API_URL }}
+          OZON_DELIVERY_SHIPMENT_METHOD_ID: ${{ vars.OZON_DELIVERY_SHIPMENT_METHOD_ID }}
+          # Secrets
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          CDEK_CLIENT_ID: ${{ secrets.CDEK_CLIENT_ID }}
+          CDEK_CLIENT_SECRET: ${{ secrets.CDEK_CLIENT_SECRET }}
+          YANDEX_DELIVERY_TOKEN: ${{ secrets.YANDEX_DELIVERY_TOKEN }}
+          POCHTA_ACCESS_TOKEN: ${{ secrets.POCHTA_ACCESS_TOKEN }}
+          POCHTA_AUTHORIZATION_KEY: ${{ secrets.POCHTA_AUTHORIZATION_KEY }}
+          OZON_PAY_ACCESS_KEY: ${{ secrets.OZON_PAY_ACCESS_KEY }}
+          OZON_PAY_NOTIFICATION_SECRET: ${{ secrets.OZON_PAY_NOTIFICATION_SECRET }}
+          OZON_DELIVERY_CLIENT_ID: ${{ secrets.OZON_DELIVERY_CLIENT_ID }}
+          OZON_DELIVERY_CLIENT_SECRET: ${{ secrets.OZON_DELIVERY_CLIENT_SECRET }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ vars.GHCR_USERNAME || github.repository_owner }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          envs: PUBLIC_WEB_URL,CORS_ORIGIN,GOOGLE_CALLBACK_URL,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,CDEK_API_URL,CDEK_FROM_LOCATION,CDEK_TARIFF_CODE,CDEK_CLIENT_ID,CDEK_CLIENT_SECRET,YANDEX_DELIVERY_API_URL,YANDEX_PLATFORM_STATION_ID,YANDEX_DELIVERY_TOKEN,POCHTA_API_URL,POCHTA_FROM_INDEX,POCHTA_MAIL_TYPE,POCHTA_ACCESS_TOKEN,POCHTA_AUTHORIZATION_KEY,MAIL_FROM,RESEND_API_KEY,OZON_PAY_API_URL,OZON_PAY_ACCESS_KEY,OZON_PAY_NOTIFICATION_SECRET,OZON_DELIVERY_API_URL,OZON_DELIVERY_SHIPMENT_METHOD_ID,OZON_DELIVERY_CLIENT_ID,OZON_DELIVERY_CLIENT_SECRET,POSTGRES_PASSWORD,GHCR_TOKEN,GHCR_USERNAME
+          script: |
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+            chmod +x compose-up.sh || true
+            touch .env
+            chmod 600 .env
+
+            if [ -n "$GHCR_TOKEN" ]; then
+              echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USERNAME:-agnosticgit}" --password-stdin
+            fi
+
+            upsert_env() {
+              key="$1"
+              value="$2"
+              file=".env"
+              [ -n "$value" ] || return 0
+              if grep -q "^${key}=" "$file"; then
+                grep -v "^${key}=" "$file" > "${file}.tmp"
+                mv "${file}.tmp" "$file"
+              fi
+              printf '%s=%s\n' "$key" "$value" >> "$file"
+            }
+
+            upsert_env PUBLIC_WEB_URL "$PUBLIC_WEB_URL"
+            upsert_env CORS_ORIGIN "$CORS_ORIGIN"
+            upsert_env GOOGLE_CALLBACK_URL "$GOOGLE_CALLBACK_URL"
+            upsert_env GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID"
+            upsert_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
+            upsert_env CDEK_API_URL "$CDEK_API_URL"
+            upsert_env CDEK_FROM_LOCATION "$CDEK_FROM_LOCATION"
+            upsert_env CDEK_TARIFF_CODE "$CDEK_TARIFF_CODE"
+            upsert_env CDEK_CLIENT_ID "$CDEK_CLIENT_ID"
+            upsert_env CDEK_CLIENT_SECRET "$CDEK_CLIENT_SECRET"
+            upsert_env YANDEX_DELIVERY_API_URL "$YANDEX_DELIVERY_API_URL"
+            upsert_env YANDEX_PLATFORM_STATION_ID "$YANDEX_PLATFORM_STATION_ID"
+            upsert_env YANDEX_DELIVERY_TOKEN "$YANDEX_DELIVERY_TOKEN"
+            upsert_env POCHTA_API_URL "$POCHTA_API_URL"
+            upsert_env POCHTA_FROM_INDEX "$POCHTA_FROM_INDEX"
+            upsert_env POCHTA_MAIL_TYPE "$POCHTA_MAIL_TYPE"
+            upsert_env POCHTA_ACCESS_TOKEN "$POCHTA_ACCESS_TOKEN"
+            upsert_env POCHTA_AUTHORIZATION_KEY "$POCHTA_AUTHORIZATION_KEY"
+            upsert_env MAIL_FROM "$MAIL_FROM"
+            upsert_env RESEND_API_KEY "$RESEND_API_KEY"
+            upsert_env OZON_PAY_API_URL "$OZON_PAY_API_URL"
+            upsert_env OZON_PAY_ACCESS_KEY "$OZON_PAY_ACCESS_KEY"
+            upsert_env OZON_PAY_NOTIFICATION_SECRET "$OZON_PAY_NOTIFICATION_SECRET"
+            upsert_env OZON_DELIVERY_API_URL "$OZON_DELIVERY_API_URL"
+            upsert_env OZON_DELIVERY_SHIPMENT_METHOD_ID "$OZON_DELIVERY_SHIPMENT_METHOD_ID"
+            upsert_env OZON_DELIVERY_CLIENT_ID "$OZON_DELIVERY_CLIENT_ID"
+            upsert_env OZON_DELIVERY_CLIENT_SECRET "$OZON_DELIVERY_CLIENT_SECRET"
+            upsert_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+            upsert_env DEPLOYED_AT "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+            ./compose-up.sh api
