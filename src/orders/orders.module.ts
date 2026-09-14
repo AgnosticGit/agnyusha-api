@@ -4,6 +4,7 @@ import { CartModule } from '../cart/cart.module';
 import { CdekModule } from '../cdek/cdek.module';
 import { MailModule } from '../mail/mail.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { PromosModule } from '../promos/promos.module';
 import { YandexModule } from '../yandex/yandex.module';
 import { DeliveryTrackingPoller } from './delivery-tracking.poller';
 import { OrdersController, AdminOrdersController } from './orders.controller';
@@ -17,6 +18,7 @@ import { OrdersService } from './orders.service';
     CdekModule,
     PaymentsModule,
     MailModule,
+    PromosModule,
   ],
   controllers: [OrdersController, AdminOrdersController],
   providers: [OrdersService, DeliveryTrackingPoller],

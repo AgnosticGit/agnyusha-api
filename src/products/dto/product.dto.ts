@@ -32,6 +32,21 @@ export class ProductVariantInput {
   @Min(1)
   weightGrams!: number;
 
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  lengthCm!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  widthCm!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  heightCm!: number;
+
   @IsNumber()
   @Min(0)
   price!: number;

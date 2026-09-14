@@ -15,6 +15,10 @@ export const ALL_STAFF_PERMISSIONS: StaffPermission[] = [
   StaffPermission.ORDER_MANAGE,
   StaffPermission.USER_MANAGE,
   StaffPermission.ANALYTICS_VIEW,
+  StaffPermission.ARTICLE_MANAGE,
+  StaffPermission.PROMO_MANAGE,
+  StaffPermission.REVIEW_MANAGE,
+  StaffPermission.SETTINGS_MANAGE,
 ];
 
 export function isStaffRole(role: UserRole): boolean {
@@ -54,6 +58,30 @@ export function canAccessAnalytics(
   user: Pick<AuthUser, 'role' | 'permissions'>,
 ): boolean {
   return hasPermission(user, StaffPermission.ANALYTICS_VIEW);
+}
+
+export function canManageArticles(
+  user: Pick<AuthUser, 'role' | 'permissions'>,
+): boolean {
+  return hasPermission(user, StaffPermission.ARTICLE_MANAGE);
+}
+
+export function canManagePromos(
+  user: Pick<AuthUser, 'role' | 'permissions'>,
+): boolean {
+  return hasPermission(user, StaffPermission.PROMO_MANAGE);
+}
+
+export function canManageReviews(
+  user: Pick<AuthUser, 'role' | 'permissions'>,
+): boolean {
+  return hasPermission(user, StaffPermission.REVIEW_MANAGE);
+}
+
+export function canManageSettings(
+  user: Pick<AuthUser, 'role' | 'permissions'>,
+): boolean {
+  return hasPermission(user, StaffPermission.SETTINGS_MANAGE);
 }
 
 /** System health / ops monitoring — ADMIN only. */

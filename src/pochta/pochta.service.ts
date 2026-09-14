@@ -399,6 +399,8 @@ export class PochtaService {
       const data = await this.request<{
         'delivery-time'?: { 'min-days'?: number; 'max-days'?: number };
         delivery?: { min?: number; max?: number };
+        'total-rate'?: number;
+        total?: number;
       }>('POST', '1.0/tariff', {
         body: {
           'index-from': this.fromIndex,
@@ -413,7 +415,15 @@ export class PochtaService {
         data?.['delivery-time']?.['min-days'] ?? data?.delivery?.min;
       const max =
         data?.['delivery-time']?.['max-days'] ?? data?.delivery?.max;
-      return etaFromDayRange(min, max);
+      const eta = etaFromDayRange(min, max);
+      if (!eta) return null;
+      // Otpravka total-rate is typically in kopecks.
+      const rawRate = data?.['total-rate'] ?? data?.total;
+      let price: number | null = null;
+      if (typeof rawRate === 'number' && Number.isFinite(rawRate) && rawRate >= 0) {
+        price = rawRate >= 1000 ? Math.round(rawRate / 100) : Math.round(rawRate);
+      }
+      return { ...eta, price };
     } catch (err) {
       this.logger.warn(
         `Pochta Otpravka tariff ETA failed to=${toIndex}: ${
@@ -477,6 +487,9 @@ export class PochtaService {
       price: number;
       qty: number;
       weightGrams: number;
+      lengthCm?: number;
+      widthCm?: number;
+      heightCm?: number;
     }>;
   }): Promise<{ orderId: string; barcode: string | null }> {
     this.assertConfigured();

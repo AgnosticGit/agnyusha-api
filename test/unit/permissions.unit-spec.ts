@@ -30,6 +30,10 @@ describe('permissions', () => {
         StaffPermission.ORDER_MANAGE,
         StaffPermission.USER_MANAGE,
         StaffPermission.ANALYTICS_VIEW,
+        StaffPermission.ARTICLE_MANAGE,
+        StaffPermission.PROMO_MANAGE,
+        StaffPermission.REVIEW_MANAGE,
+        StaffPermission.SETTINGS_MANAGE,
       ]);
     });
   });

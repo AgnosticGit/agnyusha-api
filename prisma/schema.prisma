@@ -31,6 +31,10 @@ enum StaffPermission {
   ORDER_MANAGE
   USER_MANAGE
   ANALYTICS_VIEW
+  ARTICLE_MANAGE
+  PROMO_MANAGE
+  REVIEW_MANAGE
+  SETTINGS_MANAGE
 }
 
 enum ProductCategory {
@@ -54,6 +58,16 @@ enum OrderStatus {
   CANCELLED
   /// Carrier shipment gone (CDEK 404 / purged) — stop tracking, not a success/cancel.
   ARCHIVED
+}
+
+enum PromoType {
+  PERCENT
+  FIXED
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
 }
 
 model DeliveryMethod {
@@ -84,6 +98,8 @@ model User {
   orders          Order[]
   permissions     UserPermission[]
   cart            Cart?
+  reviews         ProductReview[]
+  articles        Article[]
 
   @@map("users")
 }
@@ -124,30 +140,35 @@ model Session {
 }
 
 model Product {
-  id               String           @id @default(cuid())
-  slug             String           @unique
+  id               String              @id @default(cuid())
+  slug             String              @unique
   name             String
-  subtitle         String           @default("")
+  subtitle         String              @default("")
   image            String
-  images           String[]         @default([])
+  images           String[]            @default([])
   category         ProductCategory
-  badge            ProductBadge     @default(NONE)
-  badgeLabel       String           @default("") @map("badge_label")
-  badgeColor       String           @default("") @map("badge_color")
-  discountPercent  Int?             @map("discount_percent")
+  badge            ProductBadge        @default(NONE)
+  badgeLabel       String              @default("") @map("badge_label")
+  badgeColor       String              @default("") @map("badge_color")
+  discountPercent  Int?                @map("discount_percent")
   /// Ordered content tabs: [{ title: string, body: string (HTML) }, ...]
-  sections         Json             @default("[]")
-  nutritionProtein Float?           @map("nutrition_protein")
-  nutritionFat     Float?           @map("nutrition_fat")
-  nutritionCarbs   Float?           @map("nutrition_carbs")
-  sortOrder        Int              @default(0) @map("sort_order")
-  isActive         Boolean          @default(true) @map("is_active")
+  sections         Json                @default("[]")
+  nutritionProtein Float?              @map("nutrition_protein")
+  nutritionFat     Float?              @map("nutrition_fat")
+  nutritionCarbs   Float?              @map("nutrition_carbs")
+  sortOrder        Int                 @default(0) @map("sort_order")
+  isActive         Boolean             @default(true) @map("is_active")
   /// Curated homepage “Популярные товары” — only via admin checkbox.
-  isPopular        Boolean          @default(false) @map("is_popular")
-  createdAt        DateTime         @default(now()) @map("created_at")
-  updatedAt        DateTime         @updatedAt @map("updated_at")
+  isPopular        Boolean             @default(false) @map("is_popular")
+  /// Cached from visible reviews (updated on review write).
+  ratingAverage    Float               @default(0) @map("rating_average")
+  ratingCount      Int                 @default(0) @map("rating_count")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
   variants         ProductVariant[]
   orderItems       OrderItem[]
+  reviews          ProductReview[]
+  promoProducts    PromoCodeProduct[]
 
   @@index([category, isActive, sortOrder])
   @@index([isPopular, isActive, sortOrder])
@@ -161,6 +182,10 @@ model ProductVariant {
   weight      String
   /// Real package weight for shipping (grams).
   weightGrams Int      @map("weight_grams")
+  /// Package outer dimensions (cm) for carrier APIs.
+  lengthCm    Int      @default(20) @map("length_cm")
+  widthCm     Int      @default(15) @map("width_cm")
+  heightCm    Int      @default(10) @map("height_cm")
   price       Float
   stock       Int      @default(0)
   sortOrder   Int      @default(0) @map("sort_order")
@@ -224,14 +249,22 @@ model Order {
   paymentExternalId    String?     @map("payment_external_id")
   paymentPayLink       String?     @map("payment_pay_link")
   paidAt               DateTime?   @map("paid_at")
+  /// Pre-discount merchandise total.
+  subtotal             Float       @default(0)
+  discountAmount       Float       @default(0) @map("discount_amount")
+  promoCodeId          String?     @map("promo_code_id")
+  promoCode            String?     @map("promo_code")
   total                Float
   createdAt            DateTime    @default(now()) @map("created_at")
   user                 User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  promo                PromoCode?  @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
   items                OrderItem[]
+  reviews              ProductReview[]
 
   @@index([userId, createdAt])
   @@index([createdAt])
   @@index([email])
+  @@index([promoCodeId])
   @@map("orders")
 }
 
@@ -245,6 +278,9 @@ model OrderItem {
   weight      String
   /// Snapshot of variant shipping weight (grams) at order time.
   weightGrams Int             @map("weight_grams")
+  lengthCm    Int             @default(20) @map("length_cm")
+  widthCm     Int             @default(15) @map("width_cm")
+  heightCm    Int             @default(10) @map("height_cm")
   price       Float
   qty         Int
   order       Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -252,4 +288,84 @@ model OrderItem {
   variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
   @@map("order_items")
+}
+
+model ProductReview {
+  id        String   @id @default(cuid())
+  productId String   @map("product_id")
+  userId    String   @map("user_id")
+  orderId   String?  @map("order_id")
+  rating    Int
+  body      String
+  isHidden  Boolean  @default(false) @map("is_hidden")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, productId])
+  @@index([productId, isHidden, createdAt])
+  @@map("product_reviews")
+}
+
+model PromoCode {
+  id                   String             @id @default(cuid())
+  code                 String             @unique
+  type                 PromoType
+  value                Float
+  isActive             Boolean            @default(true) @map("is_active")
+  startsAt             DateTime?          @map("starts_at")
+  endsAt               DateTime?          @map("ends_at")
+  maxRedemptions       Int?               @map("max_redemptions")
+  redemptionCount      Int                @default(0) @map("redemption_count")
+  appliesToAllProducts Boolean            @default(true) @map("applies_to_all_products")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+  products             PromoCodeProduct[]
+  orders               Order[]
+
+  @@map("promo_codes")
+}
+
+model PromoCodeProduct {
+  promoCodeId String    @map("promo_code_id")
+  productId   String    @map("product_id")
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([promoCodeId, productId])
+  @@map("promo_code_products")
+}
+
+model Article {
+  id          String        @id @default(cuid())
+  slug        String        @unique
+  title       String
+  excerpt     String        @default("")
+  coverImage  String        @default("") @map("cover_image")
+  /// Sanitized HTML from TipTap.
+  contentHtml String        @default("") @map("content_html") @db.Text
+  /// TipTap JSON document (source of truth for editing / TOC).
+  contentJson Json          @default("{}") @map("content_json")
+  /// [{ id, text, level }] generated from headings.
+  toc         Json          @default("[]")
+  status      ArticleStatus @default(DRAFT)
+  publishedAt DateTime?     @map("published_at")
+  authorId    String        @map("author_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  author      User          @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([status, publishedAt])
+  @@map("articles")
+}
+
+/// Key/value site feature flags and display settings.
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("site_settings")
 }

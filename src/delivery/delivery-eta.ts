@@ -5,12 +5,16 @@ export type DeliveryEta = {
   minDays: number;
   maxDays: number;
   text: string;
+  /** Quoted delivery cost in rubles when the carrier returns it. */
+  price?: number | null;
 };
 
 export type DeliveryMethodWithEta = DeliveryAvailability & {
   etaMinDays?: number | null;
   etaMaxDays?: number | null;
   etaText?: string | null;
+  /** Carrier-quoted price in rubles (null when unknown). */
+  price?: number | null;
 };
 
 /** Russian plural for «день». */
@@ -92,14 +96,20 @@ export function applyEtaToMethod(
       etaMinDays: null,
       etaMaxDays: null,
       etaText: null,
+      price: null,
     };
   }
   const baseNote = method.note?.trim();
+  const price =
+    typeof eta.price === 'number' && Number.isFinite(eta.price) && eta.price >= 0
+      ? Math.round(eta.price)
+      : null;
   return {
     ...method,
     etaMinDays: eta.minDays,
     etaMaxDays: eta.maxDays,
     etaText: eta.text,
+    price,
     note: baseNote ? `${eta.text} · ${baseNote}` : eta.text,
   };
 }

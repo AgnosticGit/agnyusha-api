@@ -21,6 +21,7 @@ import {
   isYandexRequestGone,
   yandexRequestIdFromPath,
 } from './yandex.errors';
+import { combinePackageDims } from '../common/package-dims';
 
 type YandexDetectVariant = {
   geo_id: number;
@@ -78,6 +79,9 @@ export type YandexCreatePickupOrderInput = {
     price: number;
     qty: number;
     weightGrams: number;
+    lengthCm?: number;
+    widthCm?: number;
+    heightCm?: number;
   }>;
 };
 
@@ -547,10 +551,16 @@ export class YandexDeliveryService {
       throw new BadRequestException('Укажите корректный телефон получателя');
     }
 
-    const totalWeight = Math.max(
-      100,
-      input.items.reduce((s, i) => s + i.weightGrams * i.qty, 0),
+    const packageDims = combinePackageDims(
+      input.items.map((item) => ({
+        lengthCm: item.lengthCm ?? 20,
+        widthCm: item.widthCm ?? 15,
+        heightCm: item.heightCm ?? 10,
+        weightGrams: item.weightGrams,
+        qty: item.qty,
+      })),
     );
+    const totalWeight = Math.max(100, packageDims.weightGrams);
     const barcode = `BOX-${input.requestId}`.slice(0, 40);
 
     const offerBody = {
@@ -579,9 +589,9 @@ export class YandexDeliveryService {
           assessed_unit_price: item.price,
         },
         physical_dims: {
-          dx: 20,
-          dy: 15,
-          dz: 10,
+          dx: Math.max(1, Math.round(item.lengthCm ?? 20)),
+          dy: Math.max(1, Math.round(item.widthCm ?? 15)),
+          dz: Math.max(1, Math.round(item.heightCm ?? 10)),
           weight_gross: Math.max(100, item.weightGrams),
         },
         place_barcode: barcode,
@@ -589,9 +599,9 @@ export class YandexDeliveryService {
       places: [
         {
           physical_dims: {
-            dx: 20,
-            dy: 15,
-            dz: 10,
+            dx: packageDims.lengthCm,
+            dy: packageDims.widthCm,
+            dz: packageDims.heightCm,
             weight_gross: totalWeight,
           },
           barcode,

@@ -24,6 +24,8 @@ import { resolvePublicWebUrl } from '../common/web-origin';
 import { formatPersonName, normalizeEmail } from '../common/person-name';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
+import { buildOrderDoneMail } from '../mail/order-done';
+import { PromosService } from '../promos/promos.service';
 import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
 import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
 import { YandexEntityNotFoundError } from '../yandex/yandex.errors';
@@ -43,6 +45,9 @@ type ResolvedLine = {
   image: string;
   weight: string;
   weightGrams: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
   price: number;
   qty: number;
 };
@@ -59,6 +64,7 @@ export class OrdersService {
     private readonly pochta: PochtaService,
     private readonly ozonDelivery: OzonDeliveryService,
     private readonly payments: PaymentsService,
+    private readonly promos: PromosService,
     private readonly config: ConfigService,
     @Inject(MAIL_SEND) private readonly sendMail: MailSend,
   ) {}
@@ -146,6 +152,9 @@ export class OrdersService {
         image: variant.product.image,
         weight: variant.weight,
         weightGrams: resolveWeightGrams(variant.weightGrams, variant.weight),
+        lengthCm: variant.lengthCm,
+        widthCm: variant.widthCm,
+        heightCm: variant.heightCm,
         price: variant.price,
         qty: item.qty,
       });
@@ -225,7 +234,21 @@ export class OrdersService {
 
     const userId = owner.id;
     const resolvedItems = await this.resolveItems(dto.items);
-    const total = resolvedItems.reduce((s, i) => s + i.price * i.qty, 0);
+    const merchandiseTotal = resolvedItems.reduce(
+      (s, i) => s + i.price * i.qty,
+      0,
+    );
+    const promoApplied = await this.promos.resolveForOrder(
+      dto.promoCode,
+      resolvedItems.map((i) => ({
+        productId: i.productId,
+        price: i.price,
+        qty: i.qty,
+      })),
+    );
+    const subtotal = promoApplied?.subtotal ?? merchandiseTotal;
+    const discountAmount = promoApplied?.discountAmount ?? 0;
+    const total = promoApplied?.total ?? merchandiseTotal;
 
     if (deliveryCode === DeliveryMethodCode.YANDEX) {
       if (!pickupCode) {
@@ -292,6 +315,10 @@ export class OrdersService {
           deliveryTitle: dto.deliveryTitle.trim(),
           pickupLabel: dto.pickupLabel?.trim() || null,
           pickupCode,
+          subtotal,
+          discountAmount,
+          promoCodeId: promoApplied?.promoCodeId ?? null,
+          promoCode: promoApplied?.promoCode ?? null,
           total,
           items: {
             create: resolvedItems.map((i) => ({
@@ -301,6 +328,9 @@ export class OrdersService {
               image: i.image,
               weight: i.weight,
               weightGrams: i.weightGrams,
+              lengthCm: i.lengthCm,
+              widthCm: i.widthCm,
+              heightCm: i.heightCm,
               price: i.price,
               qty: i.qty,
             })),
@@ -315,6 +345,12 @@ export class OrdersService {
         },
       });
     });
+
+    if (promoApplied?.promoCodeId) {
+      await this.prisma.$transaction(async (tx) => {
+        await this.promos.incrementRedemption(promoApplied.promoCodeId, tx);
+      });
+    }
 
     let externalDeliveryId: string | null = null;
     let deliveryTrackNumber: string | null = null;
@@ -339,6 +375,9 @@ export class OrdersService {
               price: item.price,
               qty: item.qty,
               weightGrams: item.weightGrams,
+              lengthCm: item.lengthCm,
+              widthCm: item.widthCm,
+              heightCm: item.heightCm,
             })),
           });
           externalDeliveryId = yandexOrder.requestId;
@@ -358,6 +397,9 @@ export class OrdersService {
               price: item.price,
               qty: item.qty,
               weightGrams: item.weightGrams,
+              lengthCm: item.lengthCm,
+              widthCm: item.widthCm,
+              heightCm: item.heightCm,
             })),
           });
           externalDeliveryId = cdekOrder.uuid;
@@ -384,6 +426,9 @@ export class OrdersService {
               price: item.price,
               qty: item.qty,
               weightGrams: item.weightGrams,
+              lengthCm: item.lengthCm,
+              widthCm: item.widthCm,
+              heightCm: item.heightCm,
             })),
           });
           externalDeliveryId = pochtaOrder.orderId;
@@ -407,6 +452,9 @@ export class OrdersService {
               price: item.price,
               qty: item.qty,
               weightGrams: item.weightGrams,
+              lengthCm: item.lengthCm,
+              widthCm: item.widthCm,
+              heightCm: item.heightCm,
             })),
           });
           externalDeliveryId = ozonOrder.orderNumber;
@@ -749,7 +797,43 @@ export class OrdersService {
       });
     });
 
+    if (
+      status === OrderStatus.DONE &&
+      existing.status !== OrderStatus.DONE
+    ) {
+      void this.notifyOrderDone(order).catch((err) => {
+        this.logger.warn(
+          `Order done mail failed for ${order.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+    }
+
     return this.mapAdmin(order);
+  }
+
+  private async notifyOrderDone(order: {
+    id: string;
+    number: number;
+    email: string;
+    pickupLabel: string | null;
+    deliveryTitle: string;
+    cityLabel: string;
+  }) {
+    const mail = buildOrderDoneMail({
+      orderNumber: order.number,
+      webOrigin: this.webOrigin(),
+      pickupLabel: order.pickupLabel,
+      deliveryTitle: order.deliveryTitle,
+      cityLabel: order.cityLabel,
+    });
+    await this.sendMail({
+      to: order.email,
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+    });
   }
 
   /** Buyer may cancel only unpaid NEW orders. */

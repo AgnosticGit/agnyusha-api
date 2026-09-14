@@ -32,6 +32,9 @@ describe('parseVariantInputs', () => {
         sku: 'AGN-1',
         weight: '1 кг.',
         weightGrams: 1000,
+        lengthCm: 20,
+        widthCm: 15,
+        heightCm: 10,
         price: 500.6,
         stock: 3,
         sortOrder: 0,
@@ -40,9 +43,50 @@ describe('parseVariantInputs', () => {
         sku: 'AGN-2',
         weight: '2 кг.',
         weightGrams: 2000,
+        lengthCm: 20,
+        widthCm: 15,
+        heightCm: 10,
         price: 900,
         stock: 0,
         sortOrder: 1,
+      },
+    ]);
+  });
+
+  it('parses explicit package dims and skips invalid dims', () => {
+    const variants = parseVariantInputs([
+      {
+        sku: 'DIM-OK',
+        weight: '1 кг.',
+        weightGrams: 1000,
+        lengthCm: 30,
+        widthCm: 20,
+        heightCm: 12,
+        price: 100,
+        stock: 1,
+      },
+      {
+        sku: 'DIM-BAD',
+        weight: '1 кг.',
+        weightGrams: 1000,
+        lengthCm: 0,
+        widthCm: 15,
+        heightCm: 10,
+        price: 100,
+        stock: 1,
+      },
+    ]);
+    expect(variants).toEqual([
+      {
+        sku: 'DIM-OK',
+        weight: '1 кг.',
+        weightGrams: 1000,
+        lengthCm: 30,
+        widthCm: 20,
+        heightCm: 12,
+        price: 100,
+        stock: 1,
+        sortOrder: 0,
       },
     ]);
   });
@@ -69,6 +113,9 @@ describe('parseVariantInputs', () => {
         sku: 'OK-4',
         weight: '1 кг.',
         weightGrams: 1000,
+        lengthCm: 20,
+        widthCm: 15,
+        heightCm: 10,
         price: 100,
         stock: 2,
         sortOrder: 6,

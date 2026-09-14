@@ -21,6 +21,7 @@ import {
   positiveRequestId,
   settlementMatches,
 } from './ozon-delivery.util';
+import { combinePackageDims, dimsToMm } from '../common/package-dims';
 
 type TokenCache = {
   accessToken: string;
@@ -469,6 +470,9 @@ export class OzonDeliveryService {
       price: number;
       qty: number;
       weightGrams: number;
+      lengthCm?: number;
+      widthCm?: number;
+      heightCm?: number;
     }>;
   }): Promise<{
     orderNumber: string;
@@ -501,7 +505,29 @@ export class OzonDeliveryService {
       100,
       input.items.reduce((sum, i) => sum + i.weightGrams * i.qty, 0),
     );
-    const dimensions = packageDimensionsMm(weight);
+    const itemsHaveDims = input.items.every(
+      (item) =>
+        item.lengthCm != null &&
+        item.widthCm != null &&
+        item.heightCm != null,
+    );
+    const dimensions = itemsHaveDims
+      ? (() => {
+          const combined = combinePackageDims(
+            input.items.map((item) => ({
+              lengthCm: item.lengthCm ?? 20,
+              widthCm: item.widthCm ?? 15,
+              heightCm: item.heightCm ?? 10,
+              weightGrams: item.weightGrams,
+              qty: item.qty,
+            })),
+          );
+          return {
+            weight_g: Math.max(100, combined.weightGrams),
+            ...dimsToMm(combined),
+          };
+        })()
+      : packageDimensionsMm(weight);
     const declared = moneyRub(
       input.items.reduce((sum, i) => sum + i.price * i.qty, 0),
     );

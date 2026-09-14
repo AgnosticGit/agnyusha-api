@@ -3,10 +3,17 @@ export type ProductVariantDto = {
   sku: string;
   weight: string;
   weightGrams: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
   price: number;
   stock: number;
   sortOrder?: number;
 };
+
+const DEFAULT_LENGTH_CM = 20;
+const DEFAULT_WIDTH_CM = 15;
+const DEFAULT_HEIGHT_CM = 10;
 
 const DEFAULT_PRODUCT_IMAGE = '/assets/product-turkey.png';
 
@@ -83,6 +90,9 @@ export function parseVariantInputs(raw: unknown): ProductVariantDto[] {
       sku?: unknown;
       weight?: unknown;
       weightGrams?: unknown;
+      lengthCm?: unknown;
+      widthCm?: unknown;
+      heightCm?: unknown;
       price?: unknown;
       stock?: unknown;
       sortOrder?: unknown;
@@ -90,6 +100,18 @@ export function parseVariantInputs(raw: unknown): ProductVariantDto[] {
     const sku = (toOptionalString(row.sku) ?? '').toUpperCase();
     const weight = toOptionalString(row.weight) ?? '';
     const weightGrams = Math.round(Number(row.weightGrams));
+    const lengthCm =
+      row.lengthCm == null
+        ? DEFAULT_LENGTH_CM
+        : Math.round(Number(row.lengthCm));
+    const widthCm =
+      row.widthCm == null
+        ? DEFAULT_WIDTH_CM
+        : Math.round(Number(row.widthCm));
+    const heightCm =
+      row.heightCm == null
+        ? DEFAULT_HEIGHT_CM
+        : Math.round(Number(row.heightCm));
     const price = Number(row.price);
     const stock = Number(row.stock ?? 0);
     const id = toOptionalString(row.id);
@@ -99,12 +121,18 @@ export function parseVariantInputs(raw: unknown): ProductVariantDto[] {
         : index;
     if (!sku || !weight || !Number.isFinite(price) || price < 0) continue;
     if (!Number.isFinite(weightGrams) || weightGrams < 1) continue;
+    if (!Number.isFinite(lengthCm) || lengthCm < 1) continue;
+    if (!Number.isFinite(widthCm) || widthCm < 1) continue;
+    if (!Number.isFinite(heightCm) || heightCm < 1) continue;
     if (!Number.isFinite(stock) || stock < 0) continue;
     parsed.push({
       ...(id ? { id } : {}),
       sku,
       weight,
       weightGrams,
+      lengthCm,
+      widthCm,
+      heightCm,
       price: Math.round(price * 100) / 100,
       stock: Math.round(stock),
       sortOrder,

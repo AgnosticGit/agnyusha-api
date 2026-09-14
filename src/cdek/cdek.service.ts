@@ -10,6 +10,7 @@ import {
   readErrorBody,
   sanitizeSearchName,
 } from '../common/http-utils';
+import { combinePackageDims } from '../common/package-dims';
 import { CDEK_FETCH, type CdekFetch } from './cdek.tokens';
 import { CdekEntityNotFoundError } from './cdek.errors';
 import {
@@ -184,7 +185,16 @@ export class CdekService {
         typeof data.calendar_max === 'number'
           ? data.calendar_max
           : data.period_max;
-      return etaFromDayRange(min, max);
+      const eta = etaFromDayRange(min, max);
+      if (!eta) return null;
+      const sum = data.delivery_sum;
+      return {
+        ...eta,
+        price:
+          typeof sum === 'number' && Number.isFinite(sum) && sum >= 0
+            ? Math.round(sum)
+            : null,
+      };
     } catch (err) {
       this.logger.warn(
         `CDEK estimateDeliveryEta failed toCity=${toCityCode}: ${
@@ -385,6 +395,9 @@ export class CdekService {
       price: number;
       qty: number;
       weightGrams: number;
+      lengthCm?: number;
+      widthCm?: number;
+      heightCm?: number;
     }>;
   }): Promise<{ uuid: string; cdekNumber: string | null }> {
     this.assertConfigured();
@@ -400,10 +413,16 @@ export class CdekService {
       );
     }
 
-    const weight = Math.max(
-      100,
-      input.items.reduce((sum, i) => sum + i.weightGrams * i.qty, 0),
+    const packageDims = combinePackageDims(
+      input.items.map((item) => ({
+        lengthCm: item.lengthCm ?? 20,
+        widthCm: item.widthCm ?? 15,
+        heightCm: item.heightCm ?? 10,
+        weightGrams: item.weightGrams,
+        qty: item.qty,
+      })),
     );
+    const weight = Math.max(100, packageDims.weightGrams);
     const phoneDigits = input.phone.replace(/\D/g, '');
     const phone =
       phoneDigits.length >= 10
@@ -427,6 +446,9 @@ export class CdekService {
         {
           number: '1',
           weight,
+          length: packageDims.lengthCm,
+          width: packageDims.widthCm,
+          height: packageDims.heightCm,
           items: input.items.map((item, idx) => ({
             name: item.name.slice(0, 255),
             ware_key: item.wareKey.slice(0, 50) || `item-${idx + 1}`,

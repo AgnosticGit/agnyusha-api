@@ -15,7 +15,11 @@ import type { AuthUser } from './auth.types';
 import {
   canAccessAnalytics,
   canAccessSystemHealth,
+  canManageArticles,
   canManageOrders,
+  canManagePromos,
+  canManageReviews,
+  canManageSettings,
   canManageUsers,
   hasAnyProductPermission,
   hasPermission,
@@ -168,6 +172,62 @@ export class AdminOnlyGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const user = await requireUser(this.auth, req);
     if (!canAccessSystemHealth(user)) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+    return true;
+  }
+}
+
+@Injectable()
+export class ArticlesAccessGuard implements CanActivate {
+  constructor(private readonly auth: AuthService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<AuthedRequest>();
+    const user = await requireUser(this.auth, req);
+    if (!canManageArticles(user)) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+    return true;
+  }
+}
+
+@Injectable()
+export class PromosAccessGuard implements CanActivate {
+  constructor(private readonly auth: AuthService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<AuthedRequest>();
+    const user = await requireUser(this.auth, req);
+    if (!canManagePromos(user)) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+    return true;
+  }
+}
+
+@Injectable()
+export class ReviewsAccessGuard implements CanActivate {
+  constructor(private readonly auth: AuthService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<AuthedRequest>();
+    const user = await requireUser(this.auth, req);
+    if (!canManageReviews(user)) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+    return true;
+  }
+}
+
+@Injectable()
+export class SettingsAccessGuard implements CanActivate {
+  constructor(private readonly auth: AuthService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<AuthedRequest>();
+    const user = await requireUser(this.auth, req);
+    if (!canManageSettings(user)) {
       throw new ForbiddenException('Недостаточно прав');
     }
     return true;

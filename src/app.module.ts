@@ -15,6 +15,10 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { CartModule } from './cart/cart.module';
 import { PaymentsModule } from './payments/payments.module';
 import { HealthModule } from './health/health.module';
+import { SettingsModule } from './settings/settings.module';
+import { ReviewsModule } from './reviews/reviews.module';
+import { PromosModule } from './promos/promos.module';
+import { ArticlesModule } from './articles/articles.module';
 
 @Module({
   imports: [
@@ -37,6 +41,10 @@ import { HealthModule } from './health/health.module';
     CartModule,
     PaymentsModule,
     HealthModule,
+    SettingsModule,
+    ReviewsModule,
+    PromosModule,
+    ArticlesModule,
   ],
 })
 export class AppModule {}

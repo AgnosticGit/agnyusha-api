@@ -86,6 +86,11 @@ export class CreateOrderDto {
   @IsString()
   pickupCode?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  promoCode?: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
