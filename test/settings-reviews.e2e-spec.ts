@@ -43,6 +43,7 @@ describe('Settings + Reviews (e2e)', () => {
     expect(res.body).toMatchObject({
       freeDeliveryDisplayEnabled: expect.any(Boolean),
       reviewsEnabled: expect.any(Boolean),
+      inventoryEnabled: expect.any(Boolean),
     });
     expect(res.body.freeDeliveryDisplayAmount).toBeUndefined();
   });
@@ -51,9 +52,10 @@ describe('Settings + Reviews (e2e)', () => {
     const res = await request(app.getHttpServer())
       .patch('/api/admin/settings')
       .set('Cookie', adminCookie)
-      .send({ freeDeliveryDisplayEnabled: true })
+      .send({ freeDeliveryDisplayEnabled: true, inventoryEnabled: true })
       .expect(200);
     expect(res.body.freeDeliveryDisplayEnabled).toBe(true);
+    expect(res.body.inventoryEnabled).toBe(true);
   });
 
   it('review flow: purchase required', async () => {

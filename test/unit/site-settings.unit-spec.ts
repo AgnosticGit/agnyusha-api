@@ -14,17 +14,23 @@ describe('site-settings', () => {
       mergeSiteSettings({
         freeDeliveryDisplayEnabled: true,
         reviewsEnabled: false,
+        inventoryEnabled: true,
       }),
     ).toEqual({
       ...SITE_SETTINGS_DEFAULTS,
       freeDeliveryDisplayEnabled: true,
       reviewsEnabled: false,
+      inventoryEnabled: true,
     });
   });
 
   it('ignores removed freeDeliveryDisplayAmount key', () => {
     const dirty = { freeDeliveryDisplayAmount: 500 };
     expect(mergeSiteSettings(dirty)).toEqual(SITE_SETTINGS_DEFAULTS);
+  });
+
+  it('defaults inventoryEnabled to false', () => {
+    expect(mergeSiteSettings({}).inventoryEnabled).toBe(false);
   });
 
   it('public payload is a plain copy', () => {

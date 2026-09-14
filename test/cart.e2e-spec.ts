@@ -1,7 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
-import { createTestApp } from './helpers/cdek-test.helpers';
+import { createTestApp, setSiteInventoryEnabled } from './helpers/cdek-test.helpers';
 import { PrismaService } from '../src/prisma/prisma.service';
 import {
   CART_COOKIE,
@@ -203,23 +203,26 @@ describe('Cart guest persist & merge (e2e)', () => {
   });
 
   it('caps qty to stock on upsert', async () => {
-    if (process.env.INVENTORY_ENABLED !== 'true') return;
+    await setSiteInventoryEnabled(prisma, true);
+    try {
+      const add = await request(app.getHttpServer())
+        .put('/api/cart/items')
+        .send({ variantId: lowStockVariantId, qty: 99 })
+        .expect(200);
 
-    const add = await request(app.getHttpServer())
-      .put('/api/cart/items')
-      .send({ variantId: lowStockVariantId, qty: 99 })
-      .expect(200);
-
-    expect(add.body.items[0].qty).toBe(3);
-    expect(add.body.adjustments.capped).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          variantId: lowStockVariantId,
-          from: 99,
-          to: 3,
-        }),
-      ]),
-    );
+      expect(add.body.items[0].qty).toBe(3);
+      expect(add.body.adjustments.capped).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            variantId: lowStockVariantId,
+            from: 99,
+            to: 3,
+          }),
+        ]),
+      );
+    } finally {
+      await setSiteInventoryEnabled(prisma, false);
+    }
   });
 
   it('rejects inactive product and missing variant', async () => {
@@ -235,22 +238,25 @@ describe('Cart guest persist & merge (e2e)', () => {
   });
 
   it('rejects out-of-stock add', async () => {
-    if (process.env.INVENTORY_ENABLED !== 'true') return;
+    await setSiteInventoryEnabled(prisma, true);
+    try {
+      await prisma.productVariant.update({
+        where: { id: lowStockVariantId },
+        data: { stock: 0 },
+      });
 
-    await prisma.productVariant.update({
-      where: { id: lowStockVariantId },
-      data: { stock: 0 },
-    });
+      await request(app.getHttpServer())
+        .put('/api/cart/items')
+        .send({ variantId: lowStockVariantId, qty: 1 })
+        .expect(400);
 
-    await request(app.getHttpServer())
-      .put('/api/cart/items')
-      .send({ variantId: lowStockVariantId, qty: 1 })
-      .expect(400);
-
-    await prisma.productVariant.update({
-      where: { id: lowStockVariantId },
-      data: { stock: 3 },
-    });
+      await prisma.productVariant.update({
+        where: { id: lowStockVariantId },
+        data: { stock: 3 },
+      });
+    } finally {
+      await setSiteInventoryEnabled(prisma, false);
+    }
   });
 
   it('login merges guest cart into empty user cart and clears guest cookie', async () => {
@@ -315,21 +321,8 @@ describe('Cart guest persist & merge (e2e)', () => {
       .expect(200);
 
     expect(merged.body.items).toHaveLength(1);
-    if (process.env.INVENTORY_ENABLED === 'true') {
-      expect(merged.body.items[0].qty).toBe(3);
-      expect(merged.body.adjustments.capped).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            variantId: lowStockVariantId,
-            from: 4,
-            to: 3,
-          }),
-        ]),
-      );
-    } else {
-      expect(merged.body.items[0].qty).toBe(4);
-      expect(merged.body.adjustments.capped).toEqual([]);
-    }
+    expect(merged.body.items[0].qty).toBe(4);
+    expect(merged.body.adjustments.capped).toEqual([]);
   });
 
   it('merge drops inactive and out-of-stock lines', async () => {
@@ -391,40 +384,22 @@ describe('Cart guest persist & merge (e2e)', () => {
       .set('Cookie', `${user.cookie}; ${guestCookie}`)
       .expect(200);
 
-    if (process.env.INVENTORY_ENABLED === 'true') {
-      expect(
-        merged.body.items.map((i: { variantId: string }) => i.variantId),
-      ).toEqual([variantId]);
-      expect(merged.body.adjustments.removed).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            variantId: inactiveVariantId,
-            reason: 'inactive',
-          }),
-          expect.objectContaining({
-            variantId: oosVariant.id,
-            reason: 'out_of_stock',
-          }),
-        ]),
-      );
-    } else {
-      expect(
-        merged.body.items.map((i: { variantId: string }) => i.variantId).sort(),
-      ).toEqual([variantId, oosVariant.id].sort());
-      expect(merged.body.adjustments.removed).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            variantId: inactiveVariantId,
-            reason: 'inactive',
-          }),
-        ]),
-      );
-      expect(
-        merged.body.adjustments.removed.some(
-          (r: { reason: string }) => r.reason === 'out_of_stock',
-        ),
-      ).toBe(false);
-    }
+    expect(
+      merged.body.items.map((i: { variantId: string }) => i.variantId).sort(),
+    ).toEqual([variantId, oosVariant.id].sort());
+    expect(merged.body.adjustments.removed).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          variantId: inactiveVariantId,
+          reason: 'inactive',
+        }),
+      ]),
+    );
+    expect(
+      merged.body.adjustments.removed.some(
+        (r: { reason: string }) => r.reason === 'out_of_stock',
+      ),
+    ).toBe(false);
 
     await prisma.cartItem.deleteMany({ where: { variantId: oosVariant.id } });
     await prisma.productVariant.delete({ where: { id: oosVariant.id } });

@@ -4,12 +4,11 @@ import {
   AdminSettingsController,
   PublicSettingsController,
 } from './settings.controller';
-import { SettingsService } from './settings.service';
+import { SettingsCoreModule } from './settings-core.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, SettingsCoreModule],
   controllers: [PublicSettingsController, AdminSettingsController],
-  providers: [SettingsService],
-  exports: [SettingsService],
+  exports: [SettingsCoreModule],
 })
 export class SettingsModule {}

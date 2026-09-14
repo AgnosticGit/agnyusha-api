@@ -29,6 +29,10 @@ export class SettingsService {
     return toPublicSiteSettings(await this.getAll());
   }
 
+  async isInventoryEnabled(): Promise<boolean> {
+    return (await this.getAll()).inventoryEnabled;
+  }
+
   async update(patch: Partial<SiteSettings>): Promise<SiteSettings> {
     const current = await this.getAll();
     const next: SiteSettings = { ...current };

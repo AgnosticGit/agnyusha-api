@@ -1,7 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
-import { createTestApp } from './helpers/cdek-test.helpers';
+import { createTestApp, setSiteInventoryEnabled } from './helpers/cdek-test.helpers';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { hashToken, createRawToken } from '../src/auth/auth.crypto';
 import { SESSION_COOKIE } from '../src/auth/auth.crypto';
@@ -253,9 +253,7 @@ describe('Catalog admin & orders (e2e)', () => {
       .get(`/api/admin/products/${create.body.id}`)
       .set('Cookie', admin.cookie)
       .expect(200);
-    expect(afterOrder.body.variants[0].stock).toBe(
-      process.env.INVENTORY_ENABLED === 'true' ? 8 : 10,
-    );
+    expect(afterOrder.body.variants[0].stock).toBe(10);
 
     const list = await request(app.getHttpServer())
       .get('/api/orders')
@@ -576,13 +574,22 @@ describe('Catalog admin & orders (e2e)', () => {
       })
       .expect(201);
 
-    const inv = await request(app.getHttpServer())
+    const invOff = await request(app.getHttpServer())
       .get('/api/admin/inventory')
       .query({ page: 1, limit: 10 })
       .set('Cookie', staffCookie)
-      .expect(process.env.INVENTORY_ENABLED === 'true' ? 200 : 404);
+      .expect(404);
 
-    if (process.env.INVENTORY_ENABLED === 'true') {
+    expect(invOff.body.message).toBeTruthy();
+
+    await setSiteInventoryEnabled(prisma, true);
+    try {
+      const inv = await request(app.getHttpServer())
+        .get('/api/admin/inventory')
+        .query({ page: 1, limit: 10 })
+        .set('Cookie', staffCookie)
+        .expect(200);
+
       expect(Array.isArray(inv.body.items)).toBe(true);
       expect(inv.body.page).toBe(1);
       expect(inv.body.limit).toBe(10);
@@ -602,40 +609,36 @@ describe('Catalog admin & orders (e2e)', () => {
         .set('Cookie', staffCookie)
         .send({ stock: 7 })
         .expect(200);
-    } else {
-      await request(app.getHttpServer())
-        .patch(`/api/admin/inventory/${created.body.variants[0].id}`)
-        .set('Cookie', staffCookie)
-        .send({ stock: 7 })
-        .expect(404);
-    }
 
-    const buyer = await loginAs(app, 'stock-buyer@example.com', UserRole.USER);
-    await request(app.getHttpServer())
-      .post('/api/orders')
-      .set('Cookie', buyer.cookie)
-      .send({
-        email: 'buyer@example.com',
-        lastName: 'Иванов',
-        firstName: 'Иван',
-        phone: '+7 (999) 111-22-33',
-        contactChannel: 'Telegram',
-        cityLabel: 'Москва',
-        deliveryCode: 'PICKUP',
-        deliveryTitle: 'Самовывоз',
-        items: [
-          {
-            productId: created.body.id,
-            variantId: created.body.variants[0].id,
-            name: created.body.name,
-            image: created.body.image,
-            weight: '1 кг.',
-            price: 100,
-            qty: 99,
-          },
-        ],
-      })
-      .expect(process.env.INVENTORY_ENABLED === 'true' ? 400 : 201);
+      const buyer = await loginAs(app, 'stock-buyer@example.com', UserRole.USER);
+      await request(app.getHttpServer())
+        .post('/api/orders')
+        .set('Cookie', buyer.cookie)
+        .send({
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          phone: '+7 (999) 111-22-33',
+          contactChannel: 'Telegram',
+          cityLabel: 'Москва',
+          deliveryCode: 'PICKUP',
+          deliveryTitle: 'Самовывоз',
+          items: [
+            {
+              productId: created.body.id,
+              variantId: created.body.variants[0].id,
+              name: created.body.name,
+              image: created.body.image,
+              weight: '1 кг.',
+              price: 100,
+              qty: 99,
+            },
+          ],
+        })
+        .expect(400);
+    } finally {
+      await setSiteInventoryEnabled(prisma, false);
+    }
 
     const analytics = await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')

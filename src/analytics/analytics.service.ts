@@ -3,9 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { isInventoryEnabled } from '../common/inventory';
+import { SettingsService } from '../settings/settings.service';
 
 const MAX_RANGE_DAYS = 366;
 
@@ -45,7 +44,7 @@ function dateKey(d: Date) {
 export class AnalyticsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   async overview(from?: string, to?: string, productId?: string) {
@@ -165,7 +164,7 @@ export class AnalyticsService {
       dayMap.set(key, bucket);
     }
 
-    const lowStock = isInventoryEnabled(this.config)
+    const lowStock = (await this.settings.isInventoryEnabled())
       ? await this.prisma.productVariant.findMany({
           where: {
             stock: { lte: 5 },

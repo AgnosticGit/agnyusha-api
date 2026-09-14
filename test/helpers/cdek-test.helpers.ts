@@ -51,7 +51,6 @@ export function applyTestDeliveryEnv(options?: {
   process.env.MAIL_FROM = 'Агнюша <onboarding@resend.dev>';
   process.env.RESEND_API_KEY = '';
   process.env.MAGIC_LINK_EXPIRES_MINUTES = '15';
-  process.env.INVENTORY_ENABLED = 'false';
   process.env.PUBLIC_WEB_URL = 'http://localhost:3000';
   // Force empty unless a test opts in — otherwise local .env secrets leak into e2e.
   process.env.OZON_PAY_NOTIFICATION_SECRET =
@@ -340,4 +339,23 @@ export async function ensureDeliveryMethods(app: INestApplication) {
       },
     });
   }
+}
+
+/** Toggle inventory via site settings (replaces former INVENTORY_ENABLED env). */
+export async function setSiteInventoryEnabled(
+  prisma: PrismaService,
+  enabled: boolean,
+) {
+  const key = 'site';
+  const row = await prisma.siteSetting.findUnique({ where: { key } });
+  const current =
+    row?.value && typeof row.value === 'object' && !Array.isArray(row.value)
+      ? (row.value as Record<string, unknown>)
+      : {};
+  const next = { ...current, inventoryEnabled: enabled };
+  await prisma.siteSetting.upsert({
+    where: { key },
+    create: { key, value: next },
+    update: { value: next },
+  });
 }

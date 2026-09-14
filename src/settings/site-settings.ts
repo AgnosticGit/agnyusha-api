@@ -3,6 +3,7 @@ export type SiteSettings = {
   reviewsEnabled: boolean;
   articlesEnabled: boolean;
   promosEnabled: boolean;
+  inventoryEnabled: boolean;
 };
 
 export const SITE_SETTINGS_DEFAULTS: SiteSettings = {
@@ -10,6 +11,7 @@ export const SITE_SETTINGS_DEFAULTS: SiteSettings = {
   reviewsEnabled: true,
   articlesEnabled: true,
   promosEnabled: true,
+  inventoryEnabled: false,
 };
 
 export const SITE_SETTING_KEYS = Object.keys(
@@ -32,6 +34,9 @@ export function mergeSiteSettings(
     ),
     promosEnabled: Boolean(
       stored.promosEnabled ?? SITE_SETTINGS_DEFAULTS.promosEnabled,
+    ),
+    inventoryEnabled: Boolean(
+      stored.inventoryEnabled ?? SITE_SETTINGS_DEFAULTS.inventoryEnabled,
     ),
   };
 }

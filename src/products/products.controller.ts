@@ -28,8 +28,7 @@ import {
   ProductsAccessGuard,
   RequirePermissions,
 } from '../auth/auth.guard';
-import { ConfigService } from '@nestjs/config';
-import { isInventoryEnabled } from '../common/inventory';
+import { SettingsService } from '../settings/settings.service';
 
 const uploadsDir = join(process.cwd(), 'uploads');
 if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
@@ -118,7 +117,7 @@ function assertImageMagic(buffer: Buffer): boolean {
 export class ProductsController {
   constructor(
     private readonly products: ProductsService,
-    private readonly config: ConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   @Get('products')
@@ -208,8 +207,8 @@ export class ProductsController {
   @Get('admin/inventory')
   @UseGuards(PermissionsGuard)
   @RequirePermissions(StaffPermission.PRODUCT_STOCK)
-  listInventory(@Query() query: ListInventoryDto) {
-    if (!isInventoryEnabled(this.config)) {
+  async listInventory(@Query() query: ListInventoryDto) {
+    if (!(await this.settings.isInventoryEnabled())) {
       throw new NotFoundException('Инвентаризация отключена');
     }
     return this.products.listInventory({
@@ -222,11 +221,11 @@ export class ProductsController {
   @Patch('admin/inventory/:variantId')
   @UseGuards(PermissionsGuard)
   @RequirePermissions(StaffPermission.PRODUCT_STOCK)
-  updateStock(
+  async updateStock(
     @Param('variantId') variantId: string,
     @Body() body: UpdateStockDto,
   ) {
-    if (!isInventoryEnabled(this.config)) {
+    if (!(await this.settings.isInventoryEnabled())) {
       throw new NotFoundException('Инвентаризация отключена');
     }
     return this.products.updateStock(variantId, body.stock);

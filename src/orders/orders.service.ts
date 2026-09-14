@@ -18,7 +18,6 @@ import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
 import { ozonTrackingUrl } from '../ozon-delivery/ozon-delivery.util';
 import type { CreateOrderDto } from './dto/create-order.dto';
 import type { ListAdminOrdersDto } from './dto/list-admin-orders.dto';
-import { isInventoryEnabled } from '../common/inventory';
 import { resolveWeightGrams } from '../common/weight';
 import { resolvePublicWebUrl } from '../common/web-origin';
 import { formatPersonName, normalizeEmail } from '../common/person-name';
@@ -26,6 +25,7 @@ import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
 import { buildOrderDoneMail } from '../mail/order-done';
 import { PromosService } from '../promos/promos.service';
+import { SettingsService } from '../settings/settings.service';
 import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
 import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
 import { YandexEntityNotFoundError } from '../yandex/yandex.errors';
@@ -65,13 +65,10 @@ export class OrdersService {
     private readonly ozonDelivery: OzonDeliveryService,
     private readonly payments: PaymentsService,
     private readonly promos: PromosService,
+    private readonly settings: SettingsService,
     private readonly config: ConfigService,
     @Inject(MAIL_SEND) private readonly sendMail: MailSend,
   ) {}
-
-  private inventoryOn() {
-    return isInventoryEnabled(this.config);
-  }
 
   private webOrigin(): string {
     return resolvePublicWebUrl(this.config);
@@ -122,6 +119,7 @@ export class OrdersService {
     items: CreateOrderDto['items'],
   ): Promise<ResolvedLine[]> {
     const resolved: ResolvedLine[] = [];
+    const inventoryEnabled = await this.settings.isInventoryEnabled();
 
     for (const item of items) {
       if (!item.variantId?.trim()) {
@@ -138,7 +136,7 @@ export class OrdersService {
           'Товар недоступен для заказа — обновите корзину',
         );
       }
-      if (this.inventoryOn() && variant.stock < item.qty) {
+      if (inventoryEnabled && variant.stock < item.qty) {
         throw new BadRequestException(
           `В наличии только ${variant.stock} шт. — ${variant.product.name} (${variant.weight})`,
         );
@@ -283,8 +281,9 @@ export class OrdersService {
       }
     }
 
+    const inventoryEnabled = await this.settings.isInventoryEnabled();
     const order = await this.prisma.$transaction(async (tx) => {
-      if (this.inventoryOn()) {
+      if (inventoryEnabled) {
         for (const item of resolvedItems) {
           const updated = await tx.productVariant.updateMany({
             where: { id: item.variantId, stock: { gte: item.qty } },
@@ -869,7 +868,7 @@ export class OrdersService {
     tx: Prisma.TransactionClient,
     items: Array<{ variantId: string | null; qty: number }>,
   ) {
-    if (!this.inventoryOn()) return;
+    if (!(await this.settings.isInventoryEnabled())) return;
     for (const item of items) {
       if (!item.variantId) continue;
       await tx.productVariant.update({

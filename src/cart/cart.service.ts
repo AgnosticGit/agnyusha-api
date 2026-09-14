@@ -22,7 +22,7 @@ import {
   type CartLineView,
   type CartResponse,
 } from './cart.types';
-import { isInventoryEnabled } from '../common/inventory';
+import { SettingsService } from '../settings/settings.service';
 
 type CartRow = {
   id: string;
@@ -52,11 +52,8 @@ export class CartService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly settings: SettingsService,
   ) {}
-
-  private inventoryOn() {
-    return isInventoryEnabled(this.config);
-  }
 
   private secureCookies() {
     return cookieSecure(this.config);
@@ -109,6 +106,7 @@ export class CartService {
   sanitizeLines(
     raw: Array<{ variantId: string; qty: number }>,
     variants: Map<string, VariantWithProduct>,
+    inventoryEnabled: boolean,
   ): { items: CartLineView[]; adjustments: CartAdjustments } {
     const adjustments = emptyAdjustments();
     const items: CartLineView[] = [];
@@ -132,7 +130,7 @@ export class CartService {
         });
         continue;
       }
-      if (this.inventoryOn() && variant.stock <= 0) {
+      if (inventoryEnabled && variant.stock <= 0) {
         adjustments.removed.push({
           variantId: line.variantId,
           reason: 'out_of_stock',
@@ -141,7 +139,7 @@ export class CartService {
       }
 
       let lineQty = qty;
-      if (this.inventoryOn()) {
+      if (inventoryEnabled) {
         const capped = Math.min(qty, variant.stock);
         if (capped < qty) {
           adjustments.capped.push({
@@ -294,7 +292,12 @@ export class CartService {
       qty,
     }));
     const variants = await this.loadVariants(raw.map((r) => r.variantId));
-    const { items, adjustments } = this.sanitizeLines(raw, variants);
+    const inventoryEnabled = await this.settings.isInventoryEnabled();
+    const { items, adjustments } = this.sanitizeLines(
+      raw,
+      variants,
+      inventoryEnabled,
+    );
     await this.persistSanitized(userCart.id, items);
     await this.prisma.cart
       .delete({ where: { id: guest.id } })
@@ -309,7 +312,12 @@ export class CartService {
     const variants = await this.loadVariants(
       cart.items.map((i) => i.variantId),
     );
-    const { items, adjustments } = this.sanitizeLines(cart.items, variants);
+    const inventoryEnabled = await this.settings.isInventoryEnabled();
+    const { items, adjustments } = this.sanitizeLines(
+      cart.items,
+      variants,
+      inventoryEnabled,
+    );
     if (adjustments.removed.length || adjustments.capped.length) {
       await this.persistSanitized(cart.id, items);
     }
@@ -338,7 +346,12 @@ export class CartService {
     const variants = await this.loadVariants(
       guest.items.map((i) => i.variantId),
     );
-    const { items, adjustments } = this.sanitizeLines(guest.items, variants);
+    const inventoryEnabled = await this.settings.isInventoryEnabled();
+    const { items, adjustments } = this.sanitizeLines(
+      guest.items,
+      variants,
+      inventoryEnabled,
+    );
     if (adjustments.removed.length || adjustments.capped.length) {
       await this.persistSanitized(guest.id, items);
     }
@@ -401,7 +414,8 @@ export class CartService {
     if (!variant.product.isActive) {
       throw new BadRequestException('Товар снят с продажи');
     }
-    if (this.inventoryOn() && variant.stock <= 0) {
+    const inventoryEnabled = await this.settings.isInventoryEnabled();
+    if (inventoryEnabled && variant.stock <= 0) {
       throw new BadRequestException('Товара нет в наличии');
     }
 
@@ -411,11 +425,11 @@ export class CartService {
       },
     });
     const requested = qty;
-    const capped = this.inventoryOn()
+    const capped = inventoryEnabled
       ? Math.min(requested, variant.stock)
       : requested;
     const adjustments = emptyAdjustments();
-    if (this.inventoryOn() && capped < requested) {
+    if (inventoryEnabled && capped < requested) {
       adjustments.capped.push({
         variantId: opts.variantId,
         from: requested,

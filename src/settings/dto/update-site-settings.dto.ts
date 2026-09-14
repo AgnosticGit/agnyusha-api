@@ -16,4 +16,8 @@ export class UpdateSiteSettingsDto {
   @IsOptional()
   @IsBoolean()
   promosEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  inventoryEnabled?: boolean;
 }

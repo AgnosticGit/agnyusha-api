@@ -1,12 +1,14 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
 import { AnalyticsService } from '../../src/analytics/analytics.service';
 import type { PrismaService } from '../../src/prisma/prisma.service';
+import type { SettingsService } from '../../src/settings/settings.service';
 
-function fakeConfig(values: Record<string, string | undefined> = {}): ConfigService {
+function fakeSettings(
+  inventoryEnabled = false,
+): SettingsService {
   return {
-    get: jest.fn((key: string) => values[key]),
-  } as unknown as ConfigService;
+    isInventoryEnabled: jest.fn().mockResolvedValue(inventoryEnabled),
+  } as unknown as SettingsService;
 }
 
 function makePrisma(overrides: Partial<{
@@ -79,7 +81,7 @@ describe('AnalyticsService', () => {
           .mockResolvedValue([{ id: 'p1', name: 'Индейка' }]),
       },
     });
-    const service = new AnalyticsService(prisma, fakeConfig());
+    const service = new AnalyticsService(prisma, fakeSettings());
 
     const result = await service.overview();
 
@@ -106,7 +108,7 @@ describe('AnalyticsService', () => {
         findMany: jest.fn(),
       },
     });
-    const service = new AnalyticsService(prisma, fakeConfig());
+    const service = new AnalyticsService(prisma, fakeSettings());
 
     await expect(service.overview(undefined, undefined, 'missing')).rejects.toBeInstanceOf(
       NotFoundException,
@@ -115,7 +117,7 @@ describe('AnalyticsService', () => {
 
   it('returns empty() when start > end', async () => {
     const prisma = makePrisma();
-    const service = new AnalyticsService(prisma, fakeConfig());
+    const service = new AnalyticsService(prisma, fakeSettings());
 
     const result = await service.overview('2026-02-10', '2026-02-01');
     expect(result).toEqual({
@@ -139,7 +141,7 @@ describe('AnalyticsService', () => {
 
   it('throws BadRequestException when range exceeds 366 days', async () => {
     const prisma = makePrisma();
-    const service = new AnalyticsService(prisma, fakeConfig());
+    const service = new AnalyticsService(prisma, fakeSettings());
 
     await expect(
       service.overview('2024-01-01', '2025-12-31'),
@@ -184,7 +186,7 @@ describe('AnalyticsService', () => {
         ]),
       },
     });
-    const service = new AnalyticsService(prisma, fakeConfig());
+    const service = new AnalyticsService(prisma, fakeSettings());
 
     const result = await service.overview('2026-03-15', '2026-03-15', 'p1');
     expect(result.selectedProduct).toEqual({
