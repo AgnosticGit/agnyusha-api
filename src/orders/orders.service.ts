@@ -283,6 +283,10 @@ export class OrdersService {
 
     const inventoryEnabled = await this.settings.isInventoryEnabled();
     const order = await this.prisma.$transaction(async (tx) => {
+      if (promoApplied?.promoCodeId) {
+        await this.promos.incrementRedemption(promoApplied.promoCodeId, tx);
+      }
+
       if (inventoryEnabled) {
         for (const item of resolvedItems) {
           const updated = await tx.productVariant.updateMany({
@@ -344,12 +348,6 @@ export class OrdersService {
         },
       });
     });
-
-    if (promoApplied?.promoCodeId) {
-      await this.prisma.$transaction(async (tx) => {
-        await this.promos.incrementRedemption(promoApplied.promoCodeId, tx);
-      });
-    }
 
     let externalDeliveryId: string | null = null;
     let deliveryTrackNumber: string | null = null;

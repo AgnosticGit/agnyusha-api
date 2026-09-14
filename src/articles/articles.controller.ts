@@ -188,7 +188,11 @@ export class AdminArticlesController {
       if (!assertImageMagic(head)) {
         for (const path of accepted) {
           try {
-            unlinkSync(join(uploadsDir, path.replace(/^\/uploads\//, '')));
+            const name = path.replace(/^\/uploads\//, '');
+            if (!name || name.includes('..') || name.includes('/') || name.includes('\\')) {
+              continue;
+            }
+            unlinkSync(join(uploadsDir, name));
           } catch {
             /* ignore */
           }

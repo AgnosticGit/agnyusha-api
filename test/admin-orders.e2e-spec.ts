@@ -221,6 +221,28 @@ describe('Admin orders CRM (e2e)', () => {
       .expect(400);
   });
 
+  it('buyer cannot cancel a paid order', async () => {
+    const order = await seedOrder('orders-cancel-paid@example.com');
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { paidAt: new Date(), status: OrderStatus.PAID },
+    });
+    const { cookie } = await loginAs(
+      app,
+      'orders-cancel-paid@example.com',
+      UserRole.USER,
+    );
+
+    await request(app.getHttpServer())
+      .post(`/api/orders/${order.id}/cancel`)
+      .set('Cookie', cookie)
+      .expect(400);
+
+    const still = await prisma.order.findUnique({ where: { id: order.id } });
+    expect(still?.status).toBe('PAID');
+    expect(still?.paidAt).toBeTruthy();
+  });
+
   it('openOnly lists unfinished orders for account badge', async () => {
     const email = 'orders-open-only@example.com';
     const buyer = await prisma.user.upsert({

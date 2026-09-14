@@ -7,6 +7,7 @@ import {
 import { Prisma, PromoType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  assertPromoUsable,
   computePromoDiscount,
   normalizePromoCode,
   type PromoLineInput,
@@ -174,18 +175,12 @@ export class PromosService {
     },
     now = new Date(),
   ) {
-    if (!row.isActive) throw new BadRequestException('Промокод неактивен');
-    if (row.startsAt && row.startsAt > now) {
-      throw new BadRequestException('Промокод ещё не действует');
-    }
-    if (row.endsAt && row.endsAt < now) {
-      throw new BadRequestException('Срок действия промокода истёк');
-    }
-    if (
-      row.maxRedemptions != null &&
-      row.redemptionCount >= row.maxRedemptions
-    ) {
-      throw new BadRequestException('Лимит использований исчерпан');
+    try {
+      assertPromoUsable(row, now);
+    } catch (err) {
+      throw new BadRequestException(
+        err instanceof Error ? err.message : 'Промокод недоступен',
+      );
     }
   }
 
@@ -256,9 +251,19 @@ export class PromosService {
   }
 
   async incrementRedemption(promoCodeId: string, tx: Prisma.TransactionClient) {
-    await tx.promoCode.update({
-      where: { id: promoCodeId },
-      data: { redemptionCount: { increment: 1 } },
-    });
+    // Atomic: only increment when under the limit (or unlimited).
+    const updated = await tx.$executeRaw`
+      UPDATE promo_codes
+      SET redemption_count = redemption_count + 1,
+          updated_at = NOW()
+      WHERE id = ${promoCodeId}
+        AND (
+          max_redemptions IS NULL
+          OR redemption_count < max_redemptions
+        )
+    `;
+    if (Number(updated) !== 1) {
+      throw new BadRequestException('Лимит использований исчерпан');
+    }
   }
 }

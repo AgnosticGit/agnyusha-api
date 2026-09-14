@@ -121,4 +121,226 @@ describe('Promos + Articles (e2e)', () => {
       .set('Cookie', adminCookie)
       .expect(200);
   });
+
+  it('applies promo on order create and increments redemption', async () => {
+    const product = await prisma.product.findFirst({
+      where: { isActive: true },
+      include: { variants: true },
+    });
+    if (!product?.variants[0]) return;
+
+    const code = `ORD${Date.now().toString().slice(-6)}`;
+    const promo = await request(app.getHttpServer())
+      .post('/api/admin/promos')
+      .set('Cookie', adminCookie)
+      .send({
+        code,
+        type: PromoType.PERCENT,
+        value: 10,
+        isActive: true,
+        appliesToAllProducts: true,
+        maxRedemptions: 1,
+      })
+      .expect(201);
+
+    const raw = createRawToken();
+    const buyer = await prisma.user.create({
+      data: {
+        email: `promo-buyer-${Date.now()}@example.com`,
+        role: UserRole.USER,
+        emailVerifiedAt: new Date(),
+      },
+    });
+    await prisma.session.create({
+      data: {
+        userId: buyer.id,
+        tokenHash: hashToken(raw),
+        expiresAt: new Date(Date.now() + 86400000),
+      },
+    });
+    const cookie = `${SESSION_COOKIE}=${raw}`;
+    const price = product.variants[0].price;
+    const qty = 1;
+    const expectedDiscount = Math.round(price * qty * 0.1 * 100) / 100;
+
+    const order = await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', cookie)
+      .send({
+        email: buyer.email,
+        lastName: 'Иванов',
+        firstName: 'Иван',
+        phone: '+7 (999) 111-22-33',
+        contactChannel: 'Telegram',
+        cityLabel: 'Санкт-Петербург',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        promoCode: code,
+        items: [
+          {
+            productId: product.id,
+            variantId: product.variants[0].id,
+            name: product.name,
+            image: product.image,
+            weight: product.variants[0].weight,
+            price,
+            qty,
+          },
+        ],
+      })
+      .expect(201);
+
+    const expectedTotal =
+      Math.round((price * qty - expectedDiscount) * 100) / 100;
+    expect(order.body.total).toBe(expectedTotal);
+
+    const dbOrder = await prisma.order.findUnique({
+      where: { id: order.body.id },
+    });
+    expect(dbOrder?.discountAmount).toBe(expectedDiscount);
+    expect(dbOrder?.promoCode).toBe(code);
+    expect(dbOrder?.promoCodeId).toBe(promo.body.id);
+
+    const updated = await prisma.promoCode.findUnique({
+      where: { id: promo.body.id },
+    });
+    expect(updated?.redemptionCount).toBe(1);
+
+    await request(app.getHttpServer())
+      .post('/api/promos/validate')
+      .send({
+        code,
+        items: [{ productId: product.id, price, qty: 1 }],
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/promos/${promo.body.id}`)
+      .set('Cookie', adminCookie)
+      .expect(200);
+  });
+
+  it('enforces maxRedemptions atomically across concurrent orders', async () => {
+    const product = await prisma.product.findFirst({
+      where: { isActive: true },
+      include: { variants: true },
+    });
+    if (!product?.variants[0]) return;
+
+    const code = `RACE${Date.now().toString().slice(-6)}`;
+    const promo = await request(app.getHttpServer())
+      .post('/api/admin/promos')
+      .set('Cookie', adminCookie)
+      .send({
+        code,
+        type: PromoType.FIXED,
+        value: 10,
+        isActive: true,
+        appliesToAllProducts: true,
+        maxRedemptions: 1,
+      })
+      .expect(201);
+
+    async function placeOrder(email: string) {
+      const raw = createRawToken();
+      const buyer = await prisma.user.create({
+        data: {
+          email,
+          role: UserRole.USER,
+          emailVerifiedAt: new Date(),
+        },
+      });
+      await prisma.session.create({
+        data: {
+          userId: buyer.id,
+          tokenHash: hashToken(raw),
+          expiresAt: new Date(Date.now() + 86400000),
+        },
+      });
+      return request(app.getHttpServer())
+        .post('/api/orders')
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .send({
+          email,
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          phone: '+7 (999) 111-22-33',
+          contactChannel: 'Telegram',
+          cityLabel: 'Санкт-Петербург',
+          deliveryCode: 'PICKUP',
+          deliveryTitle: 'Самовывоз',
+          promoCode: code,
+          items: [
+            {
+              productId: product.id,
+              variantId: product.variants[0].id,
+              name: product.name,
+              image: product.image,
+              weight: product.variants[0].weight,
+              price: product.variants[0].price,
+              qty: 1,
+            },
+          ],
+        });
+    }
+
+    const [a, b] = await Promise.all([
+      placeOrder(`race-a-${Date.now()}@example.com`),
+      placeOrder(`race-b-${Date.now()}@example.com`),
+    ]);
+
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([201, 400]);
+
+    const updated = await prisma.promoCode.findUnique({
+      where: { id: promo.body.id },
+    });
+    expect(updated?.redemptionCount).toBe(1);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/promos/${promo.body.id}`)
+      .set('Cookie', adminCookie)
+      .expect(200);
+  });
+
+  it('rejects expired promo on validate', async () => {
+    const product = await prisma.product.findFirst({
+      where: { isActive: true },
+      include: { variants: true },
+    });
+    if (!product?.variants[0]) return;
+
+    const code = `OLD${Date.now().toString().slice(-6)}`;
+    const promo = await request(app.getHttpServer())
+      .post('/api/admin/promos')
+      .set('Cookie', adminCookie)
+      .send({
+        code,
+        type: PromoType.FIXED,
+        value: 50,
+        isActive: true,
+        appliesToAllProducts: true,
+        endsAt: new Date('2020-01-01T00:00:00.000Z').toISOString(),
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/promos/validate')
+      .send({
+        code,
+        items: [
+          {
+            productId: product.id,
+            price: product.variants[0].price,
+            qty: 1,
+          },
+        ],
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/promos/${promo.body.id}`)
+      .set('Cookie', adminCookie)
+      .expect(200);
+  });
 });

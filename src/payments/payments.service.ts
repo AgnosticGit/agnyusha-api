@@ -26,6 +26,7 @@ import {
   ozonMerchantExtId,
   parseOzonMerchantOrderNumber,
 } from './ozon-merchant-ext-id';
+import { isAllowedOzonPayLink } from './ozon-pay-link.util';
 import { carrierItemSku } from '../orders/carrier-item-sku';
 
 export type OzonPaymentLine = {
@@ -195,6 +196,11 @@ export class PaymentsService {
       throw new BadRequestException('Ozon Pay вернул неполный ответ');
     }
 
+    if (!isAllowedOzonPayLink(payLink)) {
+      this.logger.warn(`Ozon createOrder rejected payLink host: ${payLink}`);
+      throw new BadRequestException('Ozon Pay вернул некорректную ссылку');
+    }
+
     return { payLink, paymentExternalId };
   }
 
@@ -215,6 +221,11 @@ export class PaymentsService {
 
     const order = await this.prisma.order.findUnique({ where: { id } });
     if (!order) throw new NotFoundException('Заказ не найден');
+
+    // Cancelled orders must not be revived via confirm polling.
+    if (order.status === OrderStatus.CANCELLED) {
+      return { status: order.status, paid: false, number: order.number };
+    }
 
     if (order.paidAt || order.status === OrderStatus.PAID) {
       // Retry shipment create if pay succeeded but CDEK/Yandex failed earlier.
@@ -431,14 +442,10 @@ export class PaymentsService {
         ozonMerchantExtId(resolved.number),
       )) ?? (await this.fetchOzonOrderDetails(orderId));
 
-    // Ozon often sends webhooks without a notification secret header (only
-    // x-o3-trace). Prefer explicit paid status from the payload; otherwise
-    // confirm via getOrderDetails (covers AUTHORIZED → PAID lag).
+    // Secret configured but Ozon sent no auth material → must confirm via API.
+    // Never trust payload status alone when the shared secret is expected:
+    // anyone who knows an order id could otherwise forge STATUS_PAID.
     if (auth === 'absent') {
-      if (status && this.isPaidStatus(status)) {
-        await this.markOrderPaid(orderId, ozonId);
-        return { ok: true };
-      }
       const details = await fetchDetails();
       if (details && this.isPaidStatus(details.status)) {
         await this.markOrderPaid(orderId, details.id ?? ozonId);
@@ -586,6 +593,14 @@ export class PaymentsService {
       return;
     }
 
+    // Do not revive cancelled orders or mark them paid (stock already restored).
+    if (order.status === OrderStatus.CANCELLED) {
+      this.logger.warn(
+        `Ignoring Ozon paid notification for cancelled order ${order.id}`,
+      );
+      return;
+    }
+
     const alreadyPaid = Boolean(order.paidAt);
     if (alreadyPaid && order.externalDeliveryId) {
       return;
@@ -596,7 +611,6 @@ export class PaymentsService {
     let deliveryTrackingUrl = order.deliveryTrackingUrl;
 
     if (
-      order.status !== OrderStatus.CANCELLED &&
       order.deliveryCode === DeliveryMethodCode.YANDEX &&
       order.pickupCode &&
       !externalDeliveryId &&
@@ -636,7 +650,6 @@ export class PaymentsService {
     }
 
     if (
-      order.status !== OrderStatus.CANCELLED &&
       order.deliveryCode === DeliveryMethodCode.CDEK &&
       order.pickupCode &&
       !externalDeliveryId &&
@@ -680,7 +693,6 @@ export class PaymentsService {
     }
 
     if (
-      order.status !== OrderStatus.CANCELLED &&
       order.deliveryCode === DeliveryMethodCode.POST &&
       order.pickupCode &&
       !externalDeliveryId &&
@@ -727,7 +739,6 @@ export class PaymentsService {
     }
 
     if (
-      order.status !== OrderStatus.CANCELLED &&
       order.deliveryCode === DeliveryMethodCode.OZON &&
       order.pickupCode &&
       !externalDeliveryId &&

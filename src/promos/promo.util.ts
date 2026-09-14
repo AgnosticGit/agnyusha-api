@@ -13,8 +13,36 @@ export type PromoDefinition = {
   productIds: string[];
 };
 
+export type PromoUsabilityRow = {
+  isActive: boolean;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  maxRedemptions: number | null;
+  redemptionCount: number;
+};
+
 export function normalizePromoCode(code: string): string {
   return code.trim().toUpperCase();
+}
+
+/** Throws a Russian message when the promo cannot be used at `now`. */
+export function assertPromoUsable(
+  row: PromoUsabilityRow,
+  now = new Date(),
+): void {
+  if (!row.isActive) throw new Error('Промокод неактивен');
+  if (row.startsAt && row.startsAt > now) {
+    throw new Error('Промокод ещё не действует');
+  }
+  if (row.endsAt && row.endsAt < now) {
+    throw new Error('Срок действия промокода истёк');
+  }
+  if (
+    row.maxRedemptions != null &&
+    row.redemptionCount >= row.maxRedemptions
+  ) {
+    throw new Error('Лимит использований исчерпан');
+  }
 }
 
 /** Discount applied only to eligible lines; never exceeds eligible subtotal. */

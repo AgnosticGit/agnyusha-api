@@ -216,9 +216,11 @@ describe('Ozon Pay (e2e)', () => {
       });
 
       // Real Ozon often sends Completed + their id without our extId.
+      // With a valid notification secret, payload status is trusted.
       await request(created.app.getHttpServer())
         .post('/api/payments/ozon/webhook')
         .set('x-o3-trace', 'trace-missing-ext')
+        .set('x-ozon-notification-secret', 'test-notify-secret')
         .send({
           id: 'ozon-pay-only-id',
           status: 'Completed',
@@ -228,7 +230,6 @@ describe('Ozon Pay (e2e)', () => {
       const paid = await prisma.order.findUnique({ where: { id: order.id } });
       expect(paid?.status).toBe('PAID');
       expect(paid?.paidAt).toBeTruthy();
-      // Webhook status is enough — do not wait on lagging getOrderDetails.
       expect(getOrderDetailsCalls).toBe(0);
 
       await prisma.order.delete({ where: { id: order.id } });
@@ -279,13 +280,13 @@ describe('Ozon Pay (e2e)', () => {
       await request(created.app.getHttpServer())
         .post('/api/payments/ozon/webhook')
         .set('x-o3-trace', 'trace-bank-shape')
+        .set('x-ozon-notification-secret', 'test-notify-secret')
         .send({
           orderID: '01a08802-365e-7678-a56c-6698bce490d9',
           extOrderID: order.id,
           transactionID: 'tx-1',
           status: 'Completed',
           operationType: 'Payment',
-          requestSign: 'not-the-secret',
         })
         .expect(200);
 
@@ -750,6 +751,249 @@ describe('Ozon Pay (e2e)', () => {
 
       await prisma.order.delete({ where: { id: order.id } });
       await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+    } finally {
+      global.fetch = originalFetch;
+      delete process.env.OZON_PAY_ACCESS_KEY;
+      await created.app.close();
+    }
+  });
+
+  it('rejects webhook when notification secret is wrong', async () => {
+    const created = await createTestApp({
+      cdek: 'missing',
+      yandex: 'missing',
+      ozonNotificationSecret: 'correct-secret',
+    });
+    try {
+      await request(created.app.getHttpServer())
+        .post('/api/payments/ozon/webhook')
+        .set('x-ozon-notification-secret', 'wrong-secret')
+        .send({ extId: 'order-wrong-secret', status: 'STATUS_PAID' })
+        .expect(401);
+    } finally {
+      await created.app.close();
+    }
+  });
+
+  it('does not trust forged STATUS_PAID when unsigned; requires API confirm', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/getOrderDetails')) {
+        return new Response(
+          JSON.stringify({
+            item: { id: 'ozon-unpaid', status: 'STATUS_AUTHORIZED' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    const created = await createTestApp({
+      cdek: 'missing',
+      yandex: 'missing',
+      ozon: 'present',
+      ozonNotificationSecret: 'test-notify-secret',
+    });
+    const prisma = created.app.get(PrismaService);
+
+    try {
+      await ensureDeliveryMethods(created.app);
+      const order = await prisma.order.create({
+        data: {
+          email: 'forge-paid@example.com',
+          phone: '+79990001166',
+          lastName: 'Тест',
+          firstName: 'Подделка',
+          contactChannel: 'Telegram',
+          cityLabel: 'Санкт-Петербург',
+          deliveryCode: 'PICKUP',
+          deliveryTitle: 'Самовывоз',
+          total: 100,
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 100,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      await request(created.app.getHttpServer())
+        .post('/api/payments/ozon/webhook')
+        .set('x-o3-trace', 'trace-forge')
+        .send({
+          extId: order.id,
+          status: 'STATUS_PAID',
+          id: 'ozon-unpaid',
+        })
+        .expect(200);
+
+      const after = await prisma.order.findUnique({ where: { id: order.id } });
+      expect(after?.status).toBe('NEW');
+      expect(after?.paidAt).toBeNull();
+
+      await prisma.order.delete({ where: { id: order.id } });
+    } finally {
+      global.fetch = originalFetch;
+      await created.app.close();
+    }
+  });
+
+  it('does not revive CANCELLED order to PAID or create shipment', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async () => {
+      throw new Error('Ozon API must not be called for cancelled order auth match');
+    };
+
+    const created = await createTestApp({
+      cdek: 'present',
+      yandex: 'missing',
+      ozon: 'present',
+      ozonNotificationSecret: 'test-notify-secret',
+    });
+    const prisma = created.app.get(PrismaService);
+
+    try {
+      await ensureDeliveryMethods(created.app);
+      const order = await prisma.order.create({
+        data: {
+          email: 'cancelled-pay@example.com',
+          phone: '+79990001155',
+          lastName: 'Тест',
+          firstName: 'Отмена',
+          contactChannel: 'Telegram',
+          cityLabel: 'Санкт-Петербург',
+          deliveryCode: 'CDEK',
+          deliveryTitle: 'СДЭК',
+          pickupCode: 'MSK65',
+          status: 'CANCELLED',
+          total: 100,
+          paymentExternalId: 'ozon-cancelled-1',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 100,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      await request(created.app.getHttpServer())
+        .post('/api/payments/ozon/webhook')
+        .set('x-ozon-notification-secret', 'test-notify-secret')
+        .send({
+          extId: order.id,
+          status: 'STATUS_PAID',
+          id: 'ozon-cancelled-1',
+        })
+        .expect(200);
+
+      const after = await prisma.order.findUnique({ where: { id: order.id } });
+      expect(after?.status).toBe('CANCELLED');
+      expect(after?.externalDeliveryId).toBeNull();
+      expect(after?.paidAt).toBeNull();
+      expect(after?.paymentExternalId).toBe('ozon-cancelled-1');
+
+      await prisma.order.delete({ where: { id: order.id } });
+    } finally {
+      global.fetch = originalFetch;
+      await created.app.close();
+    }
+  });
+
+  it('confirm endpoint does not revive CANCELLED even if Ozon reports PAID', async () => {
+    const originalFetch = global.fetch;
+    let getOrderDetailsCalls = 0;
+    global.fetch = async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/getOrderDetails')) {
+        getOrderDetailsCalls += 1;
+        return new Response(
+          JSON.stringify({
+            item: {
+              id: 'ozon-cancelled-confirm',
+              status: 'STATUS_PAID',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    process.env.OZON_PAY_ACCESS_KEY = 'test-access-key';
+    process.env.OZON_PAY_NOTIFICATION_SECRET = '';
+
+    const created = await createTestApp({
+      cdek: 'present',
+      yandex: 'missing',
+      ozon: 'present',
+    });
+    const prisma = created.app.get(PrismaService);
+
+    try {
+      await ensureDeliveryMethods(created.app);
+      const order = await prisma.order.create({
+        data: {
+          email: 'cancelled-confirm@example.com',
+          phone: '+79990001156',
+          lastName: 'Тест',
+          firstName: 'Отмена',
+          contactChannel: 'Telegram',
+          cityLabel: 'Санкт-Петербург',
+          deliveryCode: 'CDEK',
+          deliveryTitle: 'СДЭК',
+          pickupCode: 'MSK65',
+          status: 'CANCELLED',
+          total: 100,
+          paymentExternalId: 'ozon-cancelled-confirm',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 100,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const res = await request(created.app.getHttpServer())
+        .post('/api/payments/ozon/confirm')
+        .send({ orderId: order.id })
+        .expect(200);
+
+      expect(res.body).toEqual({
+        status: 'CANCELLED',
+        paid: false,
+        number: order.number,
+      });
+      expect(getOrderDetailsCalls).toBe(0);
+
+      const after = await prisma.order.findUnique({ where: { id: order.id } });
+      expect(after?.status).toBe('CANCELLED');
+      expect(after?.paidAt).toBeNull();
+      expect(after?.externalDeliveryId).toBeNull();
+
+      await prisma.order.delete({ where: { id: order.id } });
     } finally {
       global.fetch = originalFetch;
       delete process.env.OZON_PAY_ACCESS_KEY;
