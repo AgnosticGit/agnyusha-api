@@ -2,7 +2,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /** Keys that must match `.env.${NODE_ENV}` even if the shell/IDE already injected another env file. */
-const DELIVERY_ENV_KEYS = [
+const FILE_OWNED_ENV_KEYS = [
+  'SENTRY_DSN',
+  'SENTRY_TRACES_SAMPLE_RATE',
   'CDEK_API_URL',
   'CDEK_CLIENT_ID',
   'CDEK_CLIENT_SECRET',
@@ -63,7 +65,7 @@ export function syncDeliveryEnvWithNodeEnv(
   if (!existsSync(filePath)) return null;
 
   const parsed = parseEnvFile(readFileSync(filePath, 'utf8'));
-  for (const key of DELIVERY_ENV_KEYS) {
+  for (const key of FILE_OWNED_ENV_KEYS) {
     if (Object.prototype.hasOwnProperty.call(parsed, key)) {
       env[key] = parsed[key];
     }

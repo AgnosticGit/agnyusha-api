@@ -38,6 +38,7 @@ export function applyTestDeliveryEnv(options?: {
   const ozon = options?.ozon ?? 'missing';
 
   process.env.NODE_ENV = 'test';
+  process.env.SENTRY_DSN = '';
   process.env.DATABASE_URL =
     process.env.DATABASE_URL ||
     'postgresql://agnyusha:agnyusha@localhost:5433/agnyusha?schema=public';

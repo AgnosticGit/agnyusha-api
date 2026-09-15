@@ -26,6 +26,7 @@ describe('load-env', () => {
         'CDEK_CLIENT_SECRET=prod-secret',
         'CDEK_FROM_LOCATION=SPB36',
         'CDEK_TARIFF_CODE=136',
+        'SENTRY_DSN=https://example@o0.ingest.sentry.io/1',
         'POCHTA_ACCESS_TOKEN=prod-pochta-token',
         'POCHTA_FROM_INDEX=190000',
         'CORS_ORIGIN=http://should-not-touch',
@@ -39,6 +40,7 @@ describe('load-env', () => {
       CDEK_FROM_LOCATION: 'MSK65',
       CDEK_CLIENT_ID: 'edu-id',
       POCHTA_ACCESS_TOKEN: 'dev-pochta',
+      SENTRY_DSN: 'https://stale@o0.ingest.sentry.io/0',
       CORS_ORIGIN: 'https://ngrok.example',
     };
 
@@ -49,6 +51,7 @@ describe('load-env', () => {
     expect(env.CDEK_CLIENT_ID).toBe('prod-id');
     expect(env.POCHTA_ACCESS_TOKEN).toBe('prod-pochta-token');
     expect(env.POCHTA_FROM_INDEX).toBe('190000');
+    expect(env.SENTRY_DSN).toBe('https://example@o0.ingest.sentry.io/1');
     expect(env.CORS_ORIGIN).toBe('https://ngrok.example');
   });
 

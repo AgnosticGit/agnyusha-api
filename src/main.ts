@@ -1,4 +1,6 @@
 import './load-env.bootstrap';
+// Sentry must load after env bootstrap and before Nest app modules.
+import './instrument';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
