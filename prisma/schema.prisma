@@ -54,6 +54,8 @@ enum OrderStatus {
   PAID
   CONFIRMED
   SHIPPED
+  /// At PVZ / pickup point — buyer can collect.
+  READY_FOR_PICKUP
   DONE
   CANCELLED
   /// Carrier shipment gone (CDEK 404 / purged) — stop tracking, not a success/cancel.

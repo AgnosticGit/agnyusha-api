@@ -23,13 +23,17 @@ import { resolvePublicWebUrl } from '../common/web-origin';
 import { formatPersonName, normalizeEmail } from '../common/person-name';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
 import { buildOrderReceiptMail } from '../mail/order-receipt';
-import { buildOrderDoneMail } from '../mail/order-done';
+import {
+  buildOrderDoneMail,
+  buildOrderReadyForPickupMail,
+} from '../mail/order-done';
 import { PromosService } from '../promos/promos.service';
 import { SettingsService } from '../settings/settings.service';
 import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
 import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
 import { YandexEntityNotFoundError } from '../yandex/yandex.errors';
 import { orderStatusAfterCarrierGone, OPEN_ORDER_STATUSES } from './order-status.util';
+import { resolveOrderStatusAfterCarrier } from './carrier-order-status';
 import {
   FINAL_DELIVERY_STATUS_CODES,
   isCarrierAbandonedStatus,
@@ -735,6 +739,7 @@ export class OrdersService {
       PAID: 0,
       CONFIRMED: 0,
       SHIPPED: 0,
+      READY_FOR_PICKUP: 0,
       DONE: 0,
       CANCELLED: 0,
       ARCHIVED: 0,
@@ -794,9 +799,38 @@ export class OrdersService {
       });
     });
 
+    this.maybeNotifyStatusMail(existing.status, order);
+
+    return this.mapAdmin(order);
+  }
+
+  private maybeNotifyStatusMail(
+    previous: OrderStatus,
+    order: {
+      id: string;
+      number: number;
+      email: string;
+      status: OrderStatus;
+      pickupLabel: string | null;
+      deliveryTitle: string;
+      cityLabel: string;
+    },
+  ) {
     if (
-      status === OrderStatus.DONE &&
-      existing.status !== OrderStatus.DONE
+      order.status === OrderStatus.READY_FOR_PICKUP &&
+      previous !== OrderStatus.READY_FOR_PICKUP
+    ) {
+      void this.notifyOrderReadyForPickup(order).catch((err) => {
+        this.logger.warn(
+          `Order ready-for-pickup mail failed for ${order.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+    }
+    if (
+      order.status === OrderStatus.DONE &&
+      previous !== OrderStatus.DONE
     ) {
       void this.notifyOrderDone(order).catch((err) => {
         this.logger.warn(
@@ -806,8 +840,29 @@ export class OrdersService {
         );
       });
     }
+  }
 
-    return this.mapAdmin(order);
+  private async notifyOrderReadyForPickup(order: {
+    id: string;
+    number: number;
+    email: string;
+    pickupLabel: string | null;
+    deliveryTitle: string;
+    cityLabel: string;
+  }) {
+    const mail = buildOrderReadyForPickupMail({
+      orderNumber: order.number,
+      webOrigin: this.webOrigin(),
+      pickupLabel: order.pickupLabel,
+      deliveryTitle: order.deliveryTitle,
+      cityLabel: order.cityLabel,
+    });
+    await this.sendMail({
+      to: order.email,
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+    });
   }
 
   private async notifyOrderDone(order: {
@@ -919,7 +974,8 @@ export class OrdersService {
       !order.externalDeliveryId &&
       (order.status === OrderStatus.PAID ||
         order.status === OrderStatus.CONFIRMED ||
-        order.status === OrderStatus.SHIPPED)
+        order.status === OrderStatus.SHIPPED ||
+        order.status === OrderStatus.READY_FOR_PICKUP)
     ) {
       return this.markCarrierShipmentGone(order, carrierLabel);
     }
@@ -940,7 +996,12 @@ export class OrdersService {
       order.deliveryStatusCode &&
       FINAL_DELIVERY_STATUS_CODES.has(order.deliveryStatusCode)
     ) {
-      return order;
+      // Heal Order.status if tracking already finished before auto-mapping existed.
+      return this.applyCarrierOrderStatusUpgrade(
+        order,
+        order.deliveryCode as DeliveryMethodCode,
+        order.deliveryStatusCode,
+      );
     }
     if (
       order.deliveryStatusAt &&
@@ -956,19 +1017,15 @@ export class OrdersService {
           return this.markCarrierShipmentGone(order, 'СДЭК');
         }
         const trackNumber = info.cdekNumber || order.deliveryTrackNumber;
-        const updated = await this.prisma.order.update({
-          where: { id: order.id },
-          data: {
-            deliveryTrackNumber: trackNumber,
-            deliveryStatusCode: info.statusCode,
-            deliveryStatusLabel: info.statusLabel,
-            deliveryTrackingUrl: trackNumber
-              ? cdekTrackingUrl(trackNumber)
-              : order.deliveryTrackingUrl,
-            deliveryStatusAt: new Date(),
-          },
+        return this.persistDeliveryTrackingUpdate(order, {
+          deliveryCode: DeliveryMethodCode.CDEK,
+          deliveryTrackNumber: trackNumber,
+          deliveryStatusCode: info.statusCode,
+          deliveryStatusLabel: info.statusLabel,
+          deliveryTrackingUrl: trackNumber
+            ? cdekTrackingUrl(trackNumber)
+            : order.deliveryTrackingUrl,
         });
-        return { ...order, ...updated };
       }
 
       if (order.deliveryCode === DeliveryMethodCode.POST) {
@@ -977,37 +1034,29 @@ export class OrdersService {
           return this.markCarrierShipmentGone(order, 'Почта России');
         }
         const trackNumber = info.barcode || order.deliveryTrackNumber;
-        const updated = await this.prisma.order.update({
-          where: { id: order.id },
-          data: {
-            deliveryTrackNumber: trackNumber,
-            deliveryStatusCode: info.statusCode,
-            deliveryStatusLabel: info.statusLabel,
-            deliveryTrackingUrl: trackNumber
-              ? pochtaTrackingUrl(trackNumber)
-              : order.deliveryTrackingUrl,
-            deliveryStatusAt: new Date(),
-          },
+        return this.persistDeliveryTrackingUpdate(order, {
+          deliveryCode: DeliveryMethodCode.POST,
+          deliveryTrackNumber: trackNumber,
+          deliveryStatusCode: info.statusCode,
+          deliveryStatusLabel: info.statusLabel,
+          deliveryTrackingUrl: trackNumber
+            ? pochtaTrackingUrl(trackNumber)
+            : order.deliveryTrackingUrl,
         });
-        return { ...order, ...updated };
       }
 
       const info = await this.yandex.getRequestInfo(order.externalDeliveryId);
       if (isCarrierAbandonedStatus(info.statusCode)) {
         return this.markCarrierShipmentGone(order, 'Яндекс Доставка');
       }
-      const updated = await this.prisma.order.update({
-        where: { id: order.id },
-        data: {
-          deliveryTrackNumber:
-            order.deliveryTrackNumber || order.externalDeliveryId,
-          deliveryStatusCode: info.statusCode,
-          deliveryStatusLabel: info.statusLabel || info.statusCode,
-          deliveryTrackingUrl: info.sharingUrl || order.deliveryTrackingUrl,
-          deliveryStatusAt: new Date(),
-        },
+      return this.persistDeliveryTrackingUpdate(order, {
+        deliveryCode: DeliveryMethodCode.YANDEX,
+        deliveryTrackNumber:
+          order.deliveryTrackNumber || order.externalDeliveryId,
+        deliveryStatusCode: info.statusCode,
+        deliveryStatusLabel: info.statusLabel || info.statusCode,
+        deliveryTrackingUrl: info.sharingUrl || order.deliveryTrackingUrl,
       });
-      return { ...order, ...updated };
     } catch (err) {
       if (err instanceof CdekEntityNotFoundError) {
         return this.markCarrierShipmentGone(order, 'СДЭК');
@@ -1025,6 +1074,113 @@ export class OrdersService {
       );
       return order;
     }
+  }
+
+  private async persistDeliveryTrackingUpdate<
+    T extends {
+      id: string;
+      status: OrderStatus;
+      number?: number;
+      email?: string;
+      pickupLabel?: string | null;
+      deliveryTitle?: string;
+      cityLabel?: string;
+      deliveryTrackNumber: string | null;
+      deliveryStatusCode: string | null;
+      deliveryStatusLabel: string | null;
+      deliveryTrackingUrl: string | null;
+      deliveryStatusAt: Date | null;
+    },
+  >(
+    order: T,
+    input: {
+      deliveryCode: DeliveryMethodCode;
+      deliveryTrackNumber: string | null;
+      deliveryStatusCode: string | null;
+      deliveryStatusLabel: string | null;
+      deliveryTrackingUrl: string | null;
+    },
+  ): Promise<T> {
+    const nextStatus = resolveOrderStatusAfterCarrier(
+      order.status,
+      input.deliveryCode,
+      input.deliveryStatusCode,
+    );
+    const updated = await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        deliveryTrackNumber: input.deliveryTrackNumber,
+        deliveryStatusCode: input.deliveryStatusCode,
+        deliveryStatusLabel: input.deliveryStatusLabel,
+        deliveryTrackingUrl: input.deliveryTrackingUrl,
+        deliveryStatusAt: new Date(),
+        ...(nextStatus ? { status: nextStatus } : {}),
+      },
+    });
+    const merged = { ...order, ...updated };
+    if (nextStatus && typeof order.email === 'string' && order.email) {
+      this.maybeNotifyStatusMail(order.status, {
+        id: merged.id,
+        number: merged.number ?? 0,
+        email: order.email,
+        status: merged.status,
+        pickupLabel: merged.pickupLabel ?? null,
+        deliveryTitle: merged.deliveryTitle ?? '',
+        cityLabel: merged.cityLabel ?? '',
+      });
+    } else if (nextStatus) {
+      this.logger.log(
+        `Order ${order.id}: status ${order.status} → ${nextStatus} ` +
+          `(carrier ${input.deliveryStatusCode})`,
+      );
+    }
+    return merged;
+  }
+
+  /** Upgrade Order.status from an already-stored carrier code (no API call). */
+  private async applyCarrierOrderStatusUpgrade<
+    T extends {
+      id: string;
+      status: OrderStatus;
+      number?: number;
+      email?: string;
+      pickupLabel?: string | null;
+      deliveryTitle?: string;
+      cityLabel?: string;
+      deliveryTrackNumber: string | null;
+      deliveryStatusCode: string | null;
+      deliveryStatusLabel: string | null;
+      deliveryTrackingUrl: string | null;
+      deliveryStatusAt: Date | null;
+    },
+  >(
+    order: T,
+    deliveryCode: DeliveryMethodCode,
+    carrierStatusCode: string | null,
+  ): Promise<T> {
+    const nextStatus = resolveOrderStatusAfterCarrier(
+      order.status,
+      deliveryCode,
+      carrierStatusCode,
+    );
+    if (!nextStatus) return order;
+    const updated = await this.prisma.order.update({
+      where: { id: order.id },
+      data: { status: nextStatus },
+    });
+    const merged = { ...order, ...updated };
+    if (typeof order.email === 'string' && order.email) {
+      this.maybeNotifyStatusMail(order.status, {
+        id: merged.id,
+        number: merged.number ?? 0,
+        email: order.email,
+        status: merged.status,
+        pickupLabel: merged.pickupLabel ?? null,
+        deliveryTitle: merged.deliveryTitle ?? '',
+        cityLabel: merged.cityLabel ?? '',
+      });
+    }
+    return merged;
   }
 
   /**

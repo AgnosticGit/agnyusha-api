@@ -2,6 +2,7 @@ export const REVIEW_ELIGIBLE_STATUSES = [
   'PAID',
   'CONFIRMED',
   'SHIPPED',
+  'READY_FOR_PICKUP',
   'DONE',
 ] as const;
 

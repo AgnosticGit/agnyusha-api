@@ -6,7 +6,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export type OrderDoneMailInput = {
+export type OrderReadyMailInput = {
   orderNumber: number;
   webOrigin: string;
   pickupLabel: string | null;
@@ -14,7 +14,8 @@ export type OrderDoneMailInput = {
   cityLabel: string;
 };
 
-export function buildOrderDoneMail(input: OrderDoneMailInput): {
+/** Buyer can collect at PVZ / OPS. */
+export function buildOrderReadyForPickupMail(input: OrderReadyMailInput): {
   subject: string;
   html: string;
   text: string;
@@ -25,9 +26,9 @@ export function buildOrderDoneMail(input: OrderDoneMailInput): {
     input.pickupLabel?.trim() ||
     `${input.deliveryTitle}${input.cityLabel ? ` · ${input.cityLabel}` : ''}`;
 
-  const subject = `Заказ Агнюша №${input.orderNumber} готов к получению`;
+  const subject = `Заказ Агнюша №${input.orderNumber} можно забирать`;
   const text = [
-    `Заказ №${input.orderNumber} завершён.`,
+    `Заказ №${input.orderNumber} прибыл в пункт выдачи.`,
     `Можно забирать: ${place}.`,
     `Личный кабинет: ${accountUrl}`,
   ].join('\n');
@@ -41,11 +42,11 @@ export function buildOrderDoneMail(input: OrderDoneMailInput): {
       <table role="presentation" width="100%" style="max-width:560px;background:#fffdf8;border:1px solid #e5dfd3;border-radius:24px;overflow:hidden;">
         <tr><td style="padding:28px 28px 8px;background:#2f5d4a;color:#fff;">
           <p style="margin:0;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.85;">Агнюша</p>
-          <h1 style="margin:8px 0 0;font-size:26px;font-weight:700;line-height:1.25;">Заказ готов к получению</h1>
+          <h1 style="margin:8px 0 0;font-size:26px;font-weight:700;line-height:1.25;">Можно забирать</h1>
         </td></tr>
         <tr><td style="padding:24px 28px;">
           <p style="margin:0 0 12px;font-size:16px;line-height:1.5;">
-            Заказ <strong>№${escapeHtml(String(input.orderNumber))}</strong> отмечен как завершённый.
+            Заказ <strong>№${escapeHtml(String(input.orderNumber))}</strong> прибыл в пункт выдачи.
           </p>
           <p style="margin:0 0 20px;font-size:15px;line-height:1.55;color:#444;">
             Заберите посылку здесь:<br/>
@@ -58,6 +59,54 @@ export function buildOrderDoneMail(input: OrderDoneMailInput): {
           </p>
           <p style="margin:0;font-size:13px;color:#777;line-height:1.45;">
             Если возникнут вопросы по получению — ответьте на это письмо или напишите нам через сайт.
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, html, text };
+}
+
+/** Order marked received (handed over). */
+export function buildOrderDoneMail(input: OrderReadyMailInput): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const origin = input.webOrigin.replace(/\/$/, '');
+  const accountUrl = `${origin}/account`;
+
+  const subject = `Заказ Агнюша №${input.orderNumber} получен`;
+  const text = [
+    `Заказ №${input.orderNumber} получен.`,
+    `Личный кабинет: ${accountUrl}`,
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/></head>
+<body style="margin:0;padding:0;background:#f6f3ee;font-family:Georgia,'Times New Roman',serif;color:#1a1a1a;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f3ee;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" style="max-width:560px;background:#fffdf8;border:1px solid #e5dfd3;border-radius:24px;overflow:hidden;">
+        <tr><td style="padding:28px 28px 8px;background:#2f5d4a;color:#fff;">
+          <p style="margin:0;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.85;">Агнюша</p>
+          <h1 style="margin:8px 0 0;font-size:26px;font-weight:700;line-height:1.25;">Заказ получен</h1>
+        </td></tr>
+        <tr><td style="padding:24px 28px;">
+          <p style="margin:0 0 20px;font-size:16px;line-height:1.5;">
+            Заказ <strong>№${escapeHtml(String(input.orderNumber))}</strong> отмечен как полученный. Спасибо, что выбрали Агнюшу!
+          </p>
+          <p style="margin:0 0 28px;">
+            <a href="${escapeHtml(accountUrl)}" style="display:inline-block;background:#2f5d4a;color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-size:15px;font-weight:600;">
+              Открыть кабинет
+            </a>
+          </p>
+          <p style="margin:0;font-size:13px;color:#777;line-height:1.45;">
+            Если что-то пошло не так — ответьте на это письмо или напишите нам через сайт.
           </p>
         </td></tr>
       </table>

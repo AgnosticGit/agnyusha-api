@@ -11,6 +11,7 @@ describe('OPEN_ORDER_STATUSES', () => {
       OrderStatus.PAID,
       OrderStatus.CONFIRMED,
       OrderStatus.SHIPPED,
+      OrderStatus.READY_FOR_PICKUP,
     ]);
     expect(OPEN_ORDER_STATUSES).not.toContain(OrderStatus.DONE);
     expect(OPEN_ORDER_STATUSES).not.toContain(OrderStatus.CANCELLED);
@@ -30,6 +31,9 @@ describe('orderStatusAfterCarrierGone', () => {
       OrderStatus.ARCHIVED,
     );
     expect(orderStatusAfterCarrierGone(OrderStatus.SHIPPED)).toBe(
+      OrderStatus.ARCHIVED,
+    );
+    expect(orderStatusAfterCarrierGone(OrderStatus.READY_FOR_PICKUP)).toBe(
       OrderStatus.ARCHIVED,
     );
   });

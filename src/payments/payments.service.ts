@@ -840,7 +840,7 @@ export class PaymentsService {
     await this.prisma.order.update({
       where: { id: order.id },
       data: {
-        // Do not downgrade CONFIRMED/SHIPPED/DONE back to PAID.
+        // Do not downgrade CONFIRMED/SHIPPED/READY_FOR_PICKUP/DONE back to PAID.
         status:
           order.status === OrderStatus.NEW || order.status === OrderStatus.PAID
             ? OrderStatus.PAID

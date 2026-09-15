@@ -10,7 +10,7 @@ export class ListMyOrdersDto extends PaginationQueryDto {
   @Max(50)
   override limit?: number = 10;
 
-  /** Count/list only NEW/PAID/CONFIRMED/SHIPPED (account nav badge). */
+  /** Count/list only open logistics statuses (account nav badge). */
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true' || value === '1')
   @IsBoolean()

@@ -6,6 +6,7 @@ export const OPEN_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.PAID,
   OrderStatus.CONFIRMED,
   OrderStatus.SHIPPED,
+  OrderStatus.READY_FOR_PICKUP,
 ];
 
 /** Terminal business statuses — do not overwrite on carrier entity-gone. */

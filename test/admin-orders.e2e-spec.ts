@@ -273,7 +273,7 @@ describe('Admin orders CRM (e2e)', () => {
 
     expect(open.body.total).toBe(2);
     for (const item of open.body.items as Array<{ status: string }>) {
-      expect(['NEW', 'PAID', 'CONFIRMED', 'SHIPPED']).toContain(item.status);
+      expect(['NEW', 'PAID', 'CONFIRMED', 'SHIPPED', 'READY_FOR_PICKUP']).toContain(item.status);
     }
   });
 

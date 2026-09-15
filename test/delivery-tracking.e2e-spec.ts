@@ -148,6 +148,7 @@ describe('Delivery tracking poll (e2e)', () => {
       );
       expect(order.deliveryTracking.statusCode).toBe('ACCEPTED');
       expect(order.deliveryTracking.statusLabel).toBe('Принят');
+      expect(order.status).toBe('CONFIRMED');
       expect(getOrderCalls).toBe(1);
 
       await request(app.getHttpServer())
@@ -246,6 +247,7 @@ describe('Delivery tracking poll (e2e)', () => {
           trackNumber: 'ya-req-track-1',
         }),
       );
+      expect(row.status).toBe('SHIPPED');
       expect(infoCalls).toBe(1);
 
       await request(app.getHttpServer())
