@@ -161,12 +161,15 @@ export class AuthService {
     };
   }
 
-  private async createSessionForUser(user: {
-    id: string;
-    email: string;
-    role: AuthUser['role'];
-    bannedAt?: Date | null;
-  }): Promise<{
+  private async createSessionForUser(
+    user: {
+      id: string;
+      email: string;
+      role: AuthUser['role'];
+      bannedAt?: Date | null;
+    },
+    opts: { verifyEmail?: boolean } = {},
+  ): Promise<{
     sessionToken: string;
     user: AuthUser;
     maxAgeMs: number;
@@ -175,24 +178,27 @@ export class AuthService {
       throw new ForbiddenException('Аккаунт заблокирован');
     }
 
+    const verifyEmail = opts.verifyEmail !== false;
     const maxAgeMs = SESSION_DAYS * 24 * 60 * 60 * 1000;
     const sessionToken = createRawToken();
     const expiresAt = new Date(Date.now() + maxAgeMs);
     const now = new Date();
 
-    await this.prisma.$transaction([
-      this.prisma.user.updateMany({
-        where: { id: user.id, emailVerifiedAt: null },
-        data: { emailVerifiedAt: now },
-      }),
-      this.prisma.session.create({
+    await this.prisma.$transaction(async (tx) => {
+      if (verifyEmail) {
+        await tx.user.updateMany({
+          where: { id: user.id, emailVerifiedAt: null },
+          data: { emailVerifiedAt: now },
+        });
+      }
+      await tx.session.create({
         data: {
           userId: user.id,
           tokenHash: hashToken(sessionToken),
           expiresAt,
         },
-      }),
-    ]);
+      });
+    });
 
     return {
       sessionToken,
@@ -201,6 +207,23 @@ export class AuthService {
       ),
       maxAgeMs,
     };
+  }
+
+  /** Session after guest checkout — does not mark email as verified. */
+  async createCheckoutSession(userId: string): Promise<{
+    sessionToken: string;
+    user: AuthUser;
+    maxAgeMs: number;
+  }> {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+    });
+    if (user.emailVerifiedAt) {
+      throw new BadRequestException(
+        'Войдите в аккаунт с этим email, чтобы продолжить',
+      );
+    }
+    return this.createSessionForUser(user, { verifyEmail: false });
   }
 
   async requestMagicLink(

@@ -208,13 +208,15 @@ export class OrdersService {
             where: { email },
           });
           if (existing) {
-            if (!existing.emailVerifiedAt) {
-              return this.prisma.user.update({
-                where: { id: existing.id },
-                data: { phone, lastName, firstName },
-              });
+            if (existing.emailVerifiedAt) {
+              throw new BadRequestException(
+                'Этот email уже зарегистрирован. Войдите в аккаунт, чтобы оформить заказ.',
+              );
             }
-            return existing;
+            return this.prisma.user.update({
+              where: { id: existing.id },
+              data: { phone, lastName, firstName },
+            });
           }
           return this.prisma.user.create({
             data: {
@@ -225,6 +227,8 @@ export class OrdersService {
             },
           });
         })();
+
+    const establishSessionUserId = sessionUser ? null : owner.id;
 
     // Logged-in user: keep profile in sync with checkout.
     if (sessionUser) {
@@ -523,7 +527,10 @@ export class OrdersService {
         })),
       });
       await clearOrderedFromCart();
-      return this.map(orderWithDelivery);
+      return {
+        order: this.map(orderWithDelivery),
+        establishSessionUserId,
+      };
     }
 
     try {
@@ -555,7 +562,10 @@ export class OrdersService {
       });
 
       await clearOrderedFromCart();
-      return { ...this.map(updated), payUrl: payment.payLink };
+      return {
+        order: { ...this.map(updated), payUrl: payment.payLink },
+        establishSessionUserId,
+      };
     } catch (err) {
       await this.prisma.order
         .delete({ where: { id: order.id } })

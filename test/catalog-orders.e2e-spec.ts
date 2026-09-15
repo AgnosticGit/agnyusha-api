@@ -846,6 +846,11 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(order.body.total).toBe(900);
     expect(order.body.items).toHaveLength(1);
     expect(order.body.email).toBe('guest-order@example.com');
+    expect(order.body.sessionCreated).toBe(true);
+    const sessionCookie = order.headers['set-cookie'] as string[] | undefined;
+    expect(
+      sessionCookie?.some((c) => c.startsWith(`${SESSION_COOKIE}=`)),
+    ).toBe(true);
 
     const prisma = app.get(PrismaService);
     const row = await prisma.order.findUnique({ where: { id: order.body.id } });
@@ -856,6 +861,83 @@ describe('Catalog admin & orders (e2e)', () => {
     });
     expect(account?.emailVerifiedAt).toBeNull();
     expect(account?.lastName).toBe('Иванов');
+
+    const mine = await request(app.getHttpServer())
+      .get('/api/orders')
+      .set('Cookie', sessionCookie!)
+      .expect(200);
+    expect(mine.body.items.some((o: { id: string }) => o.id === order.body.id)).toBe(
+      true,
+    );
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${created.body.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+  });
+
+  it('guest cannot attach order to a verified email without login', async () => {
+    const prisma = app.get(PrismaService);
+    await prisma.user.upsert({
+      where: { email: 'verified-owner@example.com' },
+      create: {
+        email: 'verified-owner@example.com',
+        emailVerifiedAt: new Date(),
+      },
+      update: { emailVerifiedAt: new Date() },
+    });
+
+    const admin = await loginAs(
+      app,
+      'admin-guest-verified-block@example.com',
+      UserRole.ADMIN,
+    );
+    const created = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Гостевой блок',
+        category: 'DOGS',
+        variants: [
+          {
+            sku: 'E2E-GUEST-VER-01',
+            weight: '1 кг.',
+            weightGrams: 1000,
+            lengthCm: 20,
+            widthCm: 15,
+            heightCm: 10,
+            price: 500,
+            stock: 2,
+          },
+        ],
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
+      })
+      .expect(201);
+
+    const before = await prisma.order.count({
+      where: { email: 'verified-owner@example.com' },
+    });
+
+    const res = await request(app.getHttpServer())
+      .post('/api/orders')
+      .send({
+        email: 'verified-owner@example.com',
+        lastName: 'Петров',
+        firstName: 'Пётр',
+        phone: '+7 (900) 111-22-33',
+        contactChannel: 'Telegram',
+        cityLabel: 'Москва',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+      })
+      .expect(400);
+
+    expect(String(res.body.message)).toMatch(/зарегистрирован|Войдите/i);
+    const after = await prisma.order.count({
+      where: { email: 'verified-owner@example.com' },
+    });
+    expect(after).toBe(before);
 
     await request(app.getHttpServer())
       .delete(`/api/admin/products/${created.body.id}`)
