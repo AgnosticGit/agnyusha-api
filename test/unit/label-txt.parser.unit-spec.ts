@@ -242,7 +242,7 @@ describe('parseLabelTxt', () => {
 `);
     expect(cats.category).toBe('CATS');
     expect(cats.name).toMatch(/кошек/i);
-    expect(cats.subtitle).toMatch(/стерилизованных/i);
+    expect(cats.subtitle).toBe('Подходит для стерилизованных кошек');
     expect(cats.weightGrams).toBe(2500);
     expect(cats.variants[0]).toMatchObject({
       lengthCm: 24,

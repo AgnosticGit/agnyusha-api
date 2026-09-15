@@ -246,7 +246,9 @@ function inferSubtitle(blocks: MdBlock[], productTitle: string): string {
     if (b.title.replace(/\./g, '').trim().toUpperCase() === 'АГНЮША') continue;
     for (const line of b.lines) {
       const t = line.trim();
-      if (/^подходит/i.test(t)) return t;
+      if (/^подходит/i.test(t)) {
+        return t.charAt(0).toLocaleUpperCase('ru-RU') + t.slice(1);
+      }
     }
   }
   if (/всех пород/i.test(productTitle)) {

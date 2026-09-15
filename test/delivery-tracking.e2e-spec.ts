@@ -148,7 +148,8 @@ describe('Delivery tracking poll (e2e)', () => {
       );
       expect(order.deliveryTracking.statusCode).toBe('ACCEPTED');
       expect(order.deliveryTracking.statusLabel).toBe('Принят');
-      expect(order.status).toBe('CONFIRMED');
+      // Booking in CDEK ≠ physical handover — do not bump site status yet.
+      expect(order.status).not.toBe('CONFIRMED');
       expect(getOrderCalls).toBe(1);
 
       await request(app.getHttpServer())

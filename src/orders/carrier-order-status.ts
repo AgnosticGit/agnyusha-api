@@ -106,9 +106,8 @@ const CDEK_SHIPPED = new Set([
   'DELIVERED_SENDER_CITY_CDEK',
 ]);
 
+/** CDEK: only after the parcel is physically received at the drop-off warehouse. */
 const CDEK_CONFIRMED = new Set([
-  'CREATED',
-  'ACCEPTED',
   'RECEIVED_AT_SHIPMENT_WAREHOUSE',
 ]);
 
@@ -117,6 +116,7 @@ function mapCdek(code: string): OrderStatus | null {
   if (CDEK_READY.has(code)) return OrderStatus.READY_FOR_PICKUP;
   if (CDEK_SHIPPED.has(code)) return OrderStatus.SHIPPED;
   if (CDEK_CONFIRMED.has(code)) return OrderStatus.CONFIRMED;
+  // CREATED / ACCEPTED = API booking only — stay on PAID («Собирается»).
   return null;
 }
 
@@ -132,6 +132,7 @@ const YANDEX_READY = new Set([
 
 const YANDEX_SHIPPED = new Set([
   'SORTING_CENTER_TRANSMITTED',
+  'SORTING_CENTER_PREPARED',
   'DELIVERY_AT_START',
   'DELIVERY_AT_START_SORT',
   'DELIVERY_TRANSPORTATION',
@@ -141,12 +142,10 @@ const YANDEX_SHIPPED = new Set([
   'CONFIRMATION_CODE_RECEIVED',
 ]);
 
+/** Yandex: parcel arrived at / accepted by the sorting center (not just draft created). */
 const YANDEX_CONFIRMED = new Set([
-  'CREATED',
-  'DELIVERY_PROCESSING_STARTED',
   'SORTING_CENTER_LOADED',
   'SORTING_CENTER_AT_START',
-  'SORTING_CENTER_PREPARED',
 ]);
 
 function mapYandex(code: string): OrderStatus | null {
@@ -154,5 +153,6 @@ function mapYandex(code: string): OrderStatus | null {
   if (YANDEX_READY.has(code)) return OrderStatus.READY_FOR_PICKUP;
   if (YANDEX_SHIPPED.has(code)) return OrderStatus.SHIPPED;
   if (YANDEX_CONFIRMED.has(code)) return OrderStatus.CONFIRMED;
+  // CREATED / DELIVERY_PROCESSING_STARTED = booking — stay on PAID.
   return null;
 }

@@ -6,9 +6,18 @@ import {
 } from '../../src/orders/carrier-order-status';
 
 describe('carrier-order-status', () => {
-  it('maps CDEK lifecycle', () => {
+  it('maps CDEK lifecycle (handover only after warehouse receive)', () => {
+    expect(
+      orderStatusFromCarrierCode(DeliveryMethodCode.CDEK, 'CREATED'),
+    ).toBeNull();
     expect(
       orderStatusFromCarrierCode(DeliveryMethodCode.CDEK, 'ACCEPTED'),
+    ).toBeNull();
+    expect(
+      orderStatusFromCarrierCode(
+        DeliveryMethodCode.CDEK,
+        'RECEIVED_AT_SHIPMENT_WAREHOUSE',
+      ),
     ).toBe(OrderStatus.CONFIRMED);
     expect(
       orderStatusFromCarrierCode(
@@ -27,9 +36,21 @@ describe('carrier-order-status', () => {
     ).toBe(OrderStatus.DONE);
   });
 
-  it('maps Yandex PVZ lifecycle', () => {
+  it('maps Yandex PVZ lifecycle (handover at sorting center)', () => {
     expect(
       orderStatusFromCarrierCode(DeliveryMethodCode.YANDEX, 'CREATED'),
+    ).toBeNull();
+    expect(
+      orderStatusFromCarrierCode(
+        DeliveryMethodCode.YANDEX,
+        'DELIVERY_PROCESSING_STARTED',
+      ),
+    ).toBeNull();
+    expect(
+      orderStatusFromCarrierCode(
+        DeliveryMethodCode.YANDEX,
+        'SORTING_CENTER_AT_START',
+      ),
     ).toBe(OrderStatus.CONFIRMED);
     expect(
       orderStatusFromCarrierCode(
@@ -66,9 +87,16 @@ describe('carrier-order-status', () => {
     ).toBe(false);
     expect(
       resolveOrderStatusAfterCarrier(
-        OrderStatus.SHIPPED,
+        OrderStatus.PAID,
         DeliveryMethodCode.CDEK,
         'ACCEPTED',
+      ),
+    ).toBeNull();
+    expect(
+      resolveOrderStatusAfterCarrier(
+        OrderStatus.SHIPPED,
+        DeliveryMethodCode.CDEK,
+        'RECEIVED_AT_SHIPMENT_WAREHOUSE',
       ),
     ).toBeNull();
     expect(
