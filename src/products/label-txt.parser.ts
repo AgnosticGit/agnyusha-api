@@ -7,6 +7,9 @@ export type ParsedLabelVariant = {
   price: number;
   /** 0 = sold out / «товар закончился». */
   stock: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
 };
 
 export type ParsedLabelProduct = {
@@ -288,6 +291,42 @@ export function formatPackWeightLabel(grams: number): string {
   return `${label} кг.`;
 }
 
+/** Default outer package dims (cm) by pack weight. */
+export function defaultPackageDims(weightGrams: number): {
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+} {
+  const g = Math.round(weightGrams);
+  if (g <= 250) return { lengthCm: 11, widthCm: 7, heightCm: 15 };
+  if (g <= 800) return { lengthCm: 15, widthCm: 8, heightCm: 28 };
+  if (g <= 2500) return { lengthCm: 24, widthCm: 11, heightCm: 42 };
+  if (g <= 5000) return { lengthCm: 31, widthCm: 11, heightCm: 41 };
+  return { lengthCm: 20, widthCm: 15, heightCm: 10 };
+}
+
+function parseDimsFromLine(line: string): {
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+} | null {
+  const height = /высота\s*=?\s*(\d+)/i.exec(line);
+  const length = /длина\s*=?\s*(\d+)/i.exec(line);
+  const width = /ширина\s*=?\s*(\d+)/i.exec(line);
+  if (!height || !length || !width) return null;
+  const heightCm = Number(height[1]);
+  const lengthCm = Number(length[1]);
+  const widthCm = Number(width[1]);
+  if (
+    ![heightCm, lengthCm, widthCm].every(
+      (n) => Number.isFinite(n) && n >= 1,
+    )
+  ) {
+    return null;
+  }
+  return { lengthCm, widthCm, heightCm };
+}
+
 function parsePackAmountToGrams(raw: string): number | null {
   const t = raw.trim().toLowerCase().replace(/\s+/g, ' ');
   const kg = /^([\d.,]+)\s*кг\.?$/.exec(t);
@@ -306,13 +345,14 @@ function parsePackAmountToGrams(raw: string): number | null {
 function defaultPacksForCategory(category: ProductCategory): ParsedLabelVariant[] {
   const grams =
     category === ProductCategory.CATS
-      ? [250, 800, 2500]
+      ? [250, 700, 2500]
       : [800, 2500, 5000, 12000];
   return grams.map((g) => ({
     weightLabel: formatPackWeightLabel(g),
     weightGrams: g,
     price: 1,
     stock: 50,
+    ...defaultPackageDims(g),
   }));
 }
 
@@ -345,12 +385,14 @@ function extractVariants(
 
       const priceMatch = /([\d.,]+)\s*₽/.exec(line);
       const price = priceMatch ? (parseNumberRu(priceMatch[1]) ?? 0) : 0;
+      const dims = parseDimsFromLine(line) ?? defaultPackageDims(grams);
 
       variants.push({
         weightLabel: formatPackWeightLabel(grams),
         weightGrams: grams,
         price: Math.max(0, price),
         stock: soldOut ? 0 : 50,
+        ...dims,
       });
     }
     if (variants.length) return variants;
@@ -374,6 +416,7 @@ function extractVariants(
             weightGrams: grams,
             price: 1,
             stock: 50,
+            ...defaultPackageDims(grams),
           },
         ];
       }
@@ -408,6 +451,7 @@ export function parseLabelTxt(markdown: string): ParsedLabelProduct {
     weightGrams: 800,
     price: 1,
     stock: 50,
+    ...defaultPackageDims(800),
   };
 
   const compositionHtml = collectGroupedHtml(
