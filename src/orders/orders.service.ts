@@ -978,17 +978,8 @@ export class OrdersService {
       return order;
     }
 
-    // Create-after-pay failed (or id never saved): nothing to poll at the carrier.
-    // Archive active paid+ orders so they do not stick in «Заказы» forever.
-    if (
-      !order.externalDeliveryId &&
-      (order.status === OrderStatus.PAID ||
-        order.status === OrderStatus.CONFIRMED ||
-        order.status === OrderStatus.SHIPPED ||
-        order.status === OrderStatus.READY_FOR_PICKUP)
-    ) {
-      return this.markCarrierShipmentGone(order, carrierLabel);
-    }
+    // Shipment create-after-pay may still be retrying (confirmPaid polls markOrderPaid).
+    // Keep PAID+ visible for staff — do not archive just because the id is missing yet.
     if (!order.externalDeliveryId) {
       return order;
     }

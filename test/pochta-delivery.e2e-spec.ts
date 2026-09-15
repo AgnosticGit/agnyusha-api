@@ -314,6 +314,132 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
     }
   });
 
+  it('creates only one Pochta shipment when webhook and confirm race', async () => {
+    let backlogPuts = 0;
+    const mock = createMockPochtaFetch(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method || 'GET').toUpperCase();
+
+      if (url.includes('/postoffice/1.0/190000') && method === 'GET') {
+        return jsonResponse({
+          'postal-code': '190000',
+          'address-source': 'Санкт-Петербург, Невский пр., 1',
+          settlement: 'Санкт-Петербург',
+          region: 'Санкт-Петербург',
+        });
+      }
+      if (url.includes('/1.0/user/backlog') && method === 'PUT') {
+        backlogPuts += 1;
+        // Widen the race window so concurrent markOrderPaid overlap.
+        await new Promise((r) => setTimeout(r, 100));
+        return jsonResponse({ 'result-ids': [9004] });
+      }
+      if (url.includes('/1.0/user/shipment') && method === 'POST') {
+        return jsonResponse({ 'result-ids': [9004] });
+      }
+      if (url.includes('/1.0/shipment/9004') && method === 'GET') {
+        return jsonResponse({ id: 9004, barcode: '11223344556677' });
+      }
+      return jsonResponse({ message: `unexpected ${method} ${url}` }, 500);
+    });
+
+    const originalFetch = global.fetch;
+    global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/getOrderDetails')) {
+        return new Response(
+          JSON.stringify({
+            item: {
+              id: 'ozon-pochta-race',
+              status: 'STATUS_PAID',
+              payLink: null,
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+
+    const { app: raceApp } = await createTestApp({
+      pochtaFetch: mock.fetchMock,
+      pochta: 'present',
+      cdek: 'missing',
+      yandex: 'missing',
+      ozon: 'present',
+    });
+    const prisma = raceApp.get(PrismaService);
+
+    try {
+      await ensureDeliveryMethods(raceApp);
+      const user = await prisma.user.upsert({
+        where: { email: 'pochta-race@example.com' },
+        create: { email: 'pochta-race@example.com', role: UserRole.USER },
+        update: { role: UserRole.USER },
+      });
+
+      const order = await prisma.order.create({
+        data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          userId: user.id,
+          phone: '+79001112233',
+          contactChannel: 'Telegram',
+          cityLabel: 'Санкт-Петербург',
+          deliveryCode: DeliveryMethodCode.POST,
+          deliveryTitle: 'Почта России',
+          pickupLabel: 'ОПС 190000',
+          pickupCode: '190000',
+          status: OrderStatus.NEW,
+          total: 500,
+          paymentExternalId: 'ozon-pochta-race',
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const server = raceApp.getHttpServer();
+      await Promise.all([
+        request(server)
+          .post('/api/payments/ozon/webhook')
+          .send({ extId: order.id, status: 'STATUS_PAID' })
+          .expect(200),
+        request(server)
+          .post('/api/payments/ozon/confirm')
+          .send({ orderId: order.id })
+          .expect(200),
+        request(server)
+          .post('/api/payments/ozon/webhook')
+          .send({ extId: order.id, status: 'STATUS_PAID' })
+          .expect(200),
+      ]);
+
+      expect(backlogPuts).toBe(1);
+      const updated = await prisma.order.findUnique({ where: { id: order.id } });
+      expect(updated?.paidAt).toBeTruthy();
+      expect(updated?.externalDeliveryId).toBe('9004');
+
+      await prisma.order.delete({ where: { id: order.id } });
+      await prisma.user
+        .delete({ where: { id: user.id } })
+        .catch(() => undefined);
+    } finally {
+      global.fetch = originalFetch;
+      await raceApp.close();
+    }
+  });
+
   it('syncs tracking and archives when Pochta shipment is gone', async () => {
     const goneMock = createMockPochtaFetch(async (input, init) => {
       const url = String(input);

@@ -954,7 +954,7 @@ describe('Delivery tracking poll (e2e)', () => {
     }
   });
 
-  it('archives PAID POST order when externalDeliveryId was never created', async () => {
+  it('keeps PAID POST order when externalDeliveryId was never created', async () => {
     const { app } = await createTestApp({
       cdek: 'missing',
       yandex: 'missing',
@@ -1008,9 +1008,9 @@ describe('Delivery tracking poll (e2e)', () => {
       const row = listed.body.items.find(
         (o: { id: string }) => o.id === order.id,
       );
-      expect(row.status).toBe('ARCHIVED');
-      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
-      expect(row.deliveryTracking.statusLabel).toContain('Почта');
+      expect(row.status).toBe('PAID');
+      expect(row.externalDeliveryId).toBeNull();
+      expect(row.deliveryTracking).toBeNull();
 
       await prisma.order.delete({ where: { id: order.id } });
       await prisma.user

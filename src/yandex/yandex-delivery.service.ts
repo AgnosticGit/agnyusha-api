@@ -288,6 +288,14 @@ export class YandexDeliveryService {
       if (isYandexRequestGone(path, res.status, detail)) {
         throw new YandexEntityNotFoundError(yandexRequestIdFromPath(path));
       }
+      if (
+        detail.includes('pickups_not_configured') ||
+        detail.includes('Pickups are not configured')
+      ) {
+        throw new BadRequestException(
+          'Яндекс: для склада отгрузки не настроен график отгрузки (pickups). Проверьте склад в кабинете Яндекс Доставки.',
+        );
+      }
       if (res.status >= 400 && res.status < 500) {
         throw new BadRequestException(
           'Не удалось оформить доставку Яндекс. Проверьте город и пункт выдачи.',

@@ -52,6 +52,11 @@ export class PaymentsService {
   private readonly confirmLimiter = new SlidingWindowRateLimiter(20, 60_000);
   /** Last Ozon reconcile attempt per order id (in-memory TTL). */
   private readonly paymentReconcileAt = new Map<string, number>();
+  /**
+   * Serialize markOrderPaid per order so webhook + confirm + reconcile
+   * cannot create duplicate carrier shipments (esp. Pochta backlog).
+   */
+  private readonly markPaidChain = new Map<string, Promise<void>>();
   private static readonly RECONCILE_TTL_MS = 45_000;
   private static readonly RECONCILE_MAX_PER_CALL = 3;
 
@@ -622,6 +627,21 @@ export class PaymentsService {
   }
 
   private async markOrderPaid(extId: string, ozonId: string | null) {
+    const previous = this.markPaidChain.get(extId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => this.markOrderPaidExclusive(extId, ozonId));
+    this.markPaidChain.set(extId, run);
+    try {
+      await run;
+    } finally {
+      if (this.markPaidChain.get(extId) === run) {
+        this.markPaidChain.delete(extId);
+      }
+    }
+  }
+
+  private async markOrderPaidExclusive(extId: string, ozonId: string | null) {
     const order = await this.prisma.order.findUnique({
       where: { id: extId },
       include: {
