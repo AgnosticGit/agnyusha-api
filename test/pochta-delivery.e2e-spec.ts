@@ -64,11 +64,17 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
           'mail-direct'?: number;
           'tel-address'?: number;
           'order-num'?: string;
+          dimension?: { length?: number; width?: number; height?: number };
         }>;
         expect(body[0]?.['mail-direct']).toBe(643);
         // 10-digit national — ЛК mis-formats 11-digit 7… as +7 (7XX)…
         expect(body[0]?.['tel-address']).toBe(9001234567);
         expect(body[0]?.['order-num']).toMatch(/^\d+$/);
+        expect(body[0]?.dimension).toEqual({
+          length: 200,
+          width: 150,
+          height: 100,
+        });
         return jsonResponse({ 'result-ids': [9001] });
       }
 
@@ -233,8 +239,14 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
       if (url.includes('/1.0/user/backlog') && method === 'PUT') {
         const body = JSON.parse(String(init?.body || '[]')) as Array<{
           'order-num'?: string;
+          dimension?: { length?: number; width?: number; height?: number };
         }>;
         expect(body[0]?.['order-num']).toMatch(/^\d+$/);
+        expect(body[0]?.dimension).toEqual({
+          length: 300,
+          width: 200,
+          height: 150,
+        });
         return jsonResponse({ 'result-ids': [9002] });
       }
       if (url.includes('/1.0/user/shipment') && method === 'POST') {
@@ -286,6 +298,9 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
                 image: '/assets/product-turkey.png',
                 weight: '1 кг.',
                 weightGrams: 1000,
+                lengthCm: 30,
+                widthCm: 20,
+                heightCm: 15,
                 price: 500,
                 qty: 1,
               },

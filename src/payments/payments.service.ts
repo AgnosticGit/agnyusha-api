@@ -196,7 +196,7 @@ export class PaymentsService {
       extId: merchantExtId,
       fiscalizationType: 'FISCAL_TYPE_SINGLE',
       paymentAlgorithm: 'PAY_ALGO_SMS',
-      successUrl: `${web}/payment/success?orderId=${encodeURIComponent(input.orderId)}`,
+      successUrl: `${web}/payment/success?orderId=${encodeURIComponent(input.orderId)}&orderNumber=${encodeURIComponent(String(input.orderNumber))}`,
       failUrl: `${web}/payment/fail?orderId=${encodeURIComponent(input.orderId)}`,
       notificationUrl: `${web}/api/payments/ozon/webhook`,
       items: input.items.map((item) => ({
@@ -273,15 +273,14 @@ export class PaymentsService {
     }
 
     if (order.paidAt || order.status === OrderStatus.PAID) {
-      // Retry shipment create if pay succeeded but CDEK/Yandex failed earlier.
+      // Retry shipment in background — do not block success page (Pochta is slow).
       if (!order.externalDeliveryId) {
-        await this.markOrderPaid(id, order.paymentExternalId);
+        void this.markOrderPaid(id, order.paymentExternalId);
       }
-      const updated = await this.prisma.order.findUnique({ where: { id } });
       return {
-        status: updated?.status ?? order.status,
+        status: order.status,
         paid: true,
-        number: updated?.number ?? order.number,
+        number: order.number,
       };
     }
 
@@ -303,11 +302,30 @@ export class PaymentsService {
       return { status: order.status, paid: false, number: order.number };
     }
 
-    await this.markOrderPaid(id, details.id);
+    // Mark PAID + create carrier shipment; return as soon as paidAt is written
+    // so the success page is not blocked by Pochta/CDEK/Yandex API latency.
+    const mark = this.markOrderPaid(id, details.id);
+    const deadline = Date.now() + 4_000;
+    while (Date.now() < deadline) {
+      const row = await this.prisma.order.findUnique({
+        where: { id },
+        select: { paidAt: true, status: true },
+      });
+      if (row?.paidAt) {
+        void mark;
+        return {
+          status: row.status,
+          paid: true,
+          number: order.number,
+        };
+      }
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    await mark;
     const updated = await this.prisma.order.findUnique({ where: { id } });
     return {
       status: updated?.status ?? OrderStatus.PAID,
-      paid: true,
+      paid: Boolean(updated?.paidAt),
       number: updated?.number ?? order.number,
     };
   }
@@ -667,6 +685,27 @@ export class PaymentsService {
       return;
     }
 
+    // Persist PAID before slow carrier APIs so /confirm and the success page
+    // can show the order number without waiting for Pochta/CDEK/Yandex.
+    if (!alreadyPaid) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          status: OrderStatus.PAID,
+          paidAt: new Date(),
+          paymentExternalId: ozonId ?? order.paymentExternalId,
+        },
+      });
+      this.logger.log(`Order ${order.id} marked PAID`);
+      void this.notifyOrderPaid(order).catch((err) => {
+        this.logger.warn(
+          `Order ${order.id} paid mail failed: ${
+            err instanceof Error ? err.message : 'unknown'
+          }`,
+        );
+      });
+    }
+
     let externalDeliveryId = order.externalDeliveryId;
     let deliveryTrackNumber = order.deliveryTrackNumber;
     let deliveryTrackingUrl = order.deliveryTrackingUrl;
@@ -779,6 +818,9 @@ export class PaymentsService {
             price: item.price,
             qty: item.qty,
             weightGrams: resolveWeightGrams(item.weightGrams, item.weight),
+            lengthCm: item.lengthCm,
+            widthCm: item.widthCm,
+            heightCm: item.heightCm,
           })),
         });
         externalDeliveryId = pochtaOrder.orderId;
@@ -853,33 +895,21 @@ export class PaymentsService {
       deliveryTrackNumber !== order.deliveryTrackNumber ||
       deliveryTrackingUrl !== order.deliveryTrackingUrl;
 
-    if (alreadyPaid && !deliveryChanged) {
+    if (!deliveryChanged) {
       return;
     }
 
     await this.prisma.order.update({
       where: { id: order.id },
       data: {
-        // Do not downgrade CONFIRMED/SHIPPED/READY_FOR_PICKUP/DONE back to PAID.
-        status:
-          order.status === OrderStatus.NEW || order.status === OrderStatus.PAID
-            ? OrderStatus.PAID
-            : order.status,
-        paidAt: order.paidAt ?? new Date(),
-        paymentExternalId: ozonId ?? order.paymentExternalId,
         externalDeliveryId,
         deliveryTrackNumber,
         deliveryTrackingUrl,
       },
     });
-    if (!alreadyPaid) {
-      this.logger.log(`Order ${order.id} marked PAID`);
-      await this.notifyOrderPaid(order);
-    } else if (deliveryChanged) {
-      this.logger.log(
-        `Order ${order.id} shipment backfilled after pay (externalDeliveryId=${externalDeliveryId})`,
-      );
-    }
+    this.logger.log(
+      `Order ${order.id} shipment backfilled after pay (externalDeliveryId=${externalDeliveryId})`,
+    );
   }
 
   /**
