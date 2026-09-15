@@ -27,6 +27,7 @@ import {
   parseOzonMerchantOrderNumber,
 } from './ozon-merchant-ext-id';
 import { isAllowedOzonPayLink } from './ozon-pay-link.util';
+import { describeOzonFetchError } from './ozon-fetch.util';
 import { carrierItemSku } from '../orders/carrier-item-sku';
 
 export type OzonPaymentLine = {
@@ -75,17 +76,16 @@ export class PaymentsService {
       return { ok: false, message: 'OZON_PAY_ACCESS_KEY не задан' };
     }
 
-    const res = await fetch(`${this.apiBase()}/getOrderDetails`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        accessKey,
-        orderNumber: '__agnyusha_health_probe__',
-      }),
+    const res = await this.tryPostOzon('/getOrderDetails', {
+      accessKey,
+      orderNumber: '__agnyusha_health_probe__',
     });
+    if (!res) {
+      return { ok: false, message: 'Ozon Pay недоступен (сеть)' };
+    }
 
     // Reachable API with valid key typically returns 4xx for unknown order.
-    // 401/403 → bad credentials. Network errors throw above.
+    // 401/403 → bad credentials.
     if (res.status === 401 || res.status === 403) {
       return { ok: false, message: `Ozon Pay отклонил ключ (${res.status})` };
     }
@@ -117,6 +117,42 @@ export class PaymentsService {
   /** Amount in kopecks for Ozon Pay. */
   private toKopecks(rub: number): number {
     return Math.max(0, Math.round(Number(rub) * 100));
+  }
+
+  private async postOzon(path: string, body: unknown): Promise<Response> {
+    try {
+      return await fetch(`${this.apiBase()}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Ozon ${path} network error: ${describeOzonFetchError(err)}`,
+      );
+      throw new BadRequestException(
+        'Не удалось связаться с Ozon Pay. Попробуйте позже.',
+      );
+    }
+  }
+
+  /** Best-effort Ozon call — network failures return null (no throw). */
+  private async tryPostOzon(
+    path: string,
+    body: unknown,
+  ): Promise<Response | null> {
+    try {
+      return await fetch(`${this.apiBase()}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Ozon ${path} network error: ${describeOzonFetchError(err)}`,
+      );
+      return null;
+    }
   }
 
   async createPayment(input: {
@@ -165,11 +201,7 @@ export class PaymentsService {
       })),
     };
 
-    const res = await fetch(`${this.apiBase()}/createOrder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    const res = await this.postOzon('/createOrder', payload);
     const raw = (await res.json().catch(() => null)) as Record<
       string,
       unknown
@@ -275,11 +307,12 @@ export class PaymentsService {
     const accessKey = this.accessKey();
     if (!accessKey) return null;
 
-    const res = await fetch(`${this.apiBase()}/getOrderDetails`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessKey, extId }),
+    const res = await this.tryPostOzon('/getOrderDetails', {
+      accessKey,
+      extId,
     });
+    if (!res) return null;
+
     const raw = (await res.json().catch(() => null)) as Record<
       string,
       unknown

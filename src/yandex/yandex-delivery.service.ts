@@ -381,7 +381,9 @@ export class YandexDeliveryService {
   }
 
   /**
-   * Approximate ETA to a city via offers/info (address, then a few PVZ).
+   * Approximate ETA to a city via offers/info by address (one HTTP call).
+   * Do not probe PVZs here — listing city points + serial offers/info made
+   * checkout «Загружаем варианты…» wait many seconds for little gain.
    * Failures return null — never throw to callers.
    */
   async estimateDeliveryEta(
@@ -393,27 +395,12 @@ export class YandexDeliveryService {
 
     try {
       const address = options?.fullAddress?.trim();
-      if (address) {
-        const byAddress = await this.fetchOffersInfoEta({
-          full_address: address,
-        });
-        if (byAddress.eta) return byAddress.eta;
-        // Warehouse has no pickup schedule — PVZ retries will fail the same way.
-        if (byAddress.fatal) return null;
-      }
+      if (!address) return null;
 
-      const points = await this.deliveryPoints(geoId);
-      for (const point of points.slice(0, 8)) {
-        const pickupId = point.code?.trim();
-        if (!pickupId) continue;
-        const byPvz = await this.fetchOffersInfoEta({
-          self_pickup_id: pickupId,
-          last_mile_policy: 'self_pickup',
-        });
-        if (byPvz.eta) return byPvz.eta;
-        if (byPvz.fatal) return null;
-      }
-      return null;
+      const byAddress = await this.fetchOffersInfoEta({
+        full_address: address,
+      });
+      return byAddress.eta;
     } catch (err) {
       this.logger.warn(
         `Yandex estimateDeliveryEta failed geoId=${geoId}: ${

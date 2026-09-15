@@ -4,6 +4,7 @@ import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { PochtaService } from '../pochta/pochta.service';
 import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
+import { withTimeout } from '../common/http-utils';
 import { mapDeliveryAvailability } from './delivery-availability';
 import {
   applyEtaToMethod,
@@ -11,6 +12,9 @@ import {
   type DeliveryEta,
   type DeliveryMethodWithEta,
 } from './delivery-eta';
+
+/** Cap per-carrier ETA so one hung API cannot block checkout method list. */
+export const DELIVERY_ETA_TIMEOUT_MS = 4_000;
 
 export type DeliveryMethodsQuery = {
   region?: string;
@@ -115,21 +119,41 @@ export class DeliveryService {
       [input.settlement, input.region].filter(Boolean).join(', ') ||
       undefined;
 
+    const etaOrNull = async (
+      label: string,
+      run: () => Promise<DeliveryEta | null>,
+    ): Promise<DeliveryEta | null> => {
+      try {
+        return await withTimeout(run(), DELIVERY_ETA_TIMEOUT_MS, label);
+      } catch (err) {
+        this.logger.warn(
+          `${label}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
+      }
+    };
+
     const [cdek, yandex, pochta] = await Promise.all([
       needCdek
-        ? this.cdek.estimateDeliveryEta(input.cdekCode!, input.weightGrams)
+        ? etaOrNull('CDEK ETA', () =>
+            this.cdek.estimateDeliveryEta(input.cdekCode!, input.weightGrams),
+          )
         : Promise.resolve(null),
       needYandex
-        ? this.yandex.estimateDeliveryEta(input.yandexGeoId!, {
-            fullAddress: yandexAddress,
-          })
+        ? etaOrNull('Yandex ETA', () =>
+            this.yandex.estimateDeliveryEta(input.yandexGeoId!, {
+              fullAddress: yandexAddress,
+            }),
+          )
         : Promise.resolve(null),
       needPochta
-        ? this.pochta.estimateDeliveryEta({
-            settlement: input.settlement,
-            region: input.region,
-            weightGrams: input.weightGrams,
-          })
+        ? etaOrNull('Pochta ETA', () =>
+            this.pochta.estimateDeliveryEta({
+              settlement: input.settlement,
+              region: input.region,
+              weightGrams: input.weightGrams,
+            }),
+          )
         : Promise.resolve(null),
     ]);
 

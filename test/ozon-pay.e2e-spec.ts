@@ -426,6 +426,93 @@ describe('Ozon Pay (e2e)', () => {
     }
   });
 
+  it('create order returns 400 when Ozon Pay fetch times out', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/createOrder')) {
+        const err = new TypeError('fetch failed');
+        Object.assign(err, {
+          cause: Object.assign(new Error('Connect Timeout Error'), {
+            code: 'UND_ERR_CONNECT_TIMEOUT',
+            name: 'ConnectTimeoutError',
+          }),
+        });
+        throw err;
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    process.env.OZON_PAY_ACCESS_KEY = 'test-access-key';
+    process.env.OZON_PAY_NOTIFICATION_SECRET = '';
+
+    const created = await createTestApp({
+      cdek: 'missing',
+      yandex: 'missing',
+      ozon: 'present',
+    });
+    const prisma = created.app.get(PrismaService);
+
+    try {
+      await ensureDeliveryMethods(created.app);
+      const product = await prisma.product.create({
+        data: {
+          slug: `ozon-timeout-${Date.now()}`,
+          name: 'Ozon timeout feed',
+          image: '/assets/product-turkey.png',
+          category: 'DOGS',
+          variants: {
+            create: [
+              {
+                sku: `OZON-TO-${Date.now()}`,
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 100,
+                stock: 5,
+              },
+            ],
+          },
+        },
+        include: { variants: true },
+      });
+
+      const beforeCount = await prisma.order.count({
+        where: { email: 'ozon-timeout@example.com' },
+      });
+
+      const res = await request(created.app.getHttpServer())
+        .post('/api/orders')
+        .send({
+          email: 'ozon-timeout@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          phone: '+7 (999) 111-22-44',
+          contactChannel: 'Telegram',
+          cityLabel: 'Санкт-Петербург',
+          deliveryCode: 'PICKUP',
+          deliveryTitle: 'Самовывоз',
+          items: [
+            {
+              variantId: product.variants[0].id,
+              qty: 1,
+            },
+          ],
+        })
+        .expect(400);
+
+      expect(res.body.message).toMatch(/Ozon Pay/i);
+
+      const afterCount = await prisma.order.count({
+        where: { email: 'ozon-timeout@example.com' },
+      });
+      expect(afterCount).toBe(beforeCount);
+    } finally {
+      global.fetch = originalFetch;
+      delete process.env.OZON_PAY_ACCESS_KEY;
+      await created.app.close();
+    }
+  });
+
   it('paid receipt omits login invite for verified users', async () => {
     const sent: Array<{
       to: string;
