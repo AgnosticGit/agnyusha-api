@@ -10,32 +10,28 @@ export type PackageLine = PackageDimsCm & {
 };
 
 /**
- * Collapse order lines into one outer carton for carriers:
- * - length/width = max across items (sorted descending faces)
- * - height = sum of heights × qty (stacked)
+ * Collapse order lines into one outer carton for carriers.
+ * Keeps catalog axes: max length/width, stacked height × qty.
  */
 export function combinePackageDims(lines: PackageLine[]): PackageDimsCm & {
   weightGrams: number;
 } {
   let weightGrams = 0;
   let heightCm = 0;
-  let maxA = 1;
-  let maxB = 1;
+  let lengthCm = 1;
+  let widthCm = 1;
 
   for (const line of lines) {
     const qty = Math.max(1, Math.floor(line.qty) || 1);
     weightGrams += Math.max(1, line.weightGrams) * qty;
-    const faces = [line.lengthCm, line.widthCm, line.heightCm]
-      .map((n) => Math.max(1, Math.round(n) || 1))
-      .sort((a, b) => b - a);
-    maxA = Math.max(maxA, faces[0]);
-    maxB = Math.max(maxB, faces[1]);
-    heightCm += faces[2] * qty;
+    lengthCm = Math.max(lengthCm, Math.max(1, Math.round(line.lengthCm) || 1));
+    widthCm = Math.max(widthCm, Math.max(1, Math.round(line.widthCm) || 1));
+    heightCm += Math.max(1, Math.round(line.heightCm) || 1) * qty;
   }
 
   return {
-    lengthCm: maxA,
-    widthCm: maxB,
+    lengthCm,
+    widthCm,
     heightCm: Math.max(1, heightCm),
     weightGrams: Math.max(1, weightGrams),
   };

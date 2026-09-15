@@ -71,9 +71,9 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
         expect(body[0]?.['tel-address']).toBe(9001234567);
         expect(body[0]?.['order-num']).toMatch(/^\d+$/);
         expect(body[0]?.dimension).toEqual({
-          length: 200,
-          width: 150,
-          height: 100,
+          length: 20,
+          width: 15,
+          height: 10,
         });
         return jsonResponse({ 'result-ids': [9001] });
       }
@@ -243,9 +243,9 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
         }>;
         expect(body[0]?.['order-num']).toMatch(/^\d+$/);
         expect(body[0]?.dimension).toEqual({
-          length: 300,
-          width: 200,
-          height: 150,
+          length: 30,
+          width: 20,
+          height: 15,
         });
         return jsonResponse({ 'result-ids': [9002] });
       }

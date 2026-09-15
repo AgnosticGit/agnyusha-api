@@ -18,6 +18,25 @@ describe('package-dims', () => {
     });
   });
 
+  it('keeps catalog axes for a tall 800g pack', () => {
+    expect(
+      combinePackageDims([
+        {
+          lengthCm: 15,
+          widthCm: 8,
+          heightCm: 28,
+          weightGrams: 800,
+          qty: 1,
+        },
+      ]),
+    ).toEqual({
+      lengthCm: 15,
+      widthCm: 8,
+      heightCm: 28,
+      weightGrams: 800,
+    });
+  });
+
   it('converts cm to mm', () => {
     expect(dimsToMm({ lengthCm: 20, widthCm: 15, heightCm: 10 })).toEqual({
       length_mm: 200,

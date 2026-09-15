@@ -6,7 +6,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { combinePackageDims, dimsToMm } from '../common/package-dims';
+import { combinePackageDims } from '../common/package-dims';
 import { readErrorBody, sanitizeSearchName } from '../common/http-utils';
 import {
   etaFromDayRange,
@@ -539,8 +539,12 @@ export class PochtaService {
         qty: item.qty,
       })),
     );
-    // Otpravka backlog expects dimension in millimeters.
-    const dimensionMm = dimsToMm(packageDims);
+    // Otpravka backlog `dimension` is in centimeters (ЛК shows the same numbers as см).
+    const dimensionCm = {
+      length: Math.max(1, Math.round(packageDims.lengthCm)),
+      width: Math.max(1, Math.round(packageDims.widthCm)),
+      height: Math.max(1, Math.round(packageDims.heightCm)),
+    };
     const phone = pochtaTelAddress(input.phone);
     if (phone == null) {
       throw new BadRequestException('Укажите корректный телефон получателя');
@@ -572,11 +576,7 @@ export class PochtaService {
         'mail-type': this.mailType,
         'mail-direct': mailDirect,
         mass,
-        dimension: {
-          length: dimensionMm.length_mm,
-          width: dimensionMm.width_mm,
-          height: dimensionMm.height_mm,
-        },
+        dimension: dimensionCm,
         'order-num': input.orderNumber.slice(0, 20),
         'index-to': Number(indexTo),
         'place-to': placeTo.slice(0, 100),
