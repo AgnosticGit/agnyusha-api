@@ -19,3 +19,33 @@ export function describeOzonFetchError(err: unknown): string {
 
   return parts.join(' — ');
 }
+
+export type OzonFailureCapture = (
+  error: unknown,
+  context?: {
+    level?: 'error' | 'warning';
+    tags?: Record<string, string>;
+    extra?: Record<string, unknown>;
+  },
+) => void;
+
+/**
+ * Report Ozon network failures to Sentry (or a test spy).
+ * Client still gets a safe HttpException — without this, 4xx would be dropped.
+ */
+export function reportOzonNetworkFailure(
+  err: unknown,
+  path: string,
+  capture: OzonFailureCapture,
+): void {
+  const detail = describeOzonFetchError(err);
+  const error = err instanceof Error ? err : new Error(detail);
+  capture(error, {
+    level: 'error',
+    tags: {
+      feature: 'ozon_pay',
+      ozon_path: path,
+    },
+    extra: { detail },
+  });
+}

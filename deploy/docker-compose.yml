@@ -110,3 +110,8 @@ volumes:
 
 networks:
   internal:
+    driver: bridge
+    # Host NIC on Reg.ru/OpenStack is typically MTU 1450; Docker default 1500
+    # breaks TLS to some destinations (Ozon Pay ConnectTimeout from containers).
+    driver_opts:
+      com.docker.network.driver.mtu: "1450"

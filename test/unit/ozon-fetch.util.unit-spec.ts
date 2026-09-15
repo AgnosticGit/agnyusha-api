@@ -1,4 +1,7 @@
-import { describeOzonFetchError } from '../../src/payments/ozon-fetch.util';
+import {
+  describeOzonFetchError,
+  reportOzonNetworkFailure,
+} from '../../src/payments/ozon-fetch.util';
 
 describe('describeOzonFetchError', () => {
   it('includes undici ConnectTimeoutError cause (Sentry AGNYUSHA-API-1)', () => {
@@ -18,5 +21,22 @@ describe('describeOzonFetchError', () => {
   it('handles plain errors without cause', () => {
     expect(describeOzonFetchError(new Error('boom'))).toBe('boom');
     expect(describeOzonFetchError('raw')).toBe('raw');
+  });
+});
+
+describe('reportOzonNetworkFailure', () => {
+  it('captures original error with ozon_pay tags for Sentry', () => {
+    const err = new TypeError('fetch failed');
+    const capture = jest.fn();
+
+    reportOzonNetworkFailure(err, '/createOrder', capture);
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture.mock.calls[0][0]).toBe(err);
+    expect(capture.mock.calls[0][1]).toMatchObject({
+      level: 'error',
+      tags: { feature: 'ozon_pay', ozon_path: '/createOrder' },
+      extra: { detail: 'fetch failed' },
+    });
   });
 });

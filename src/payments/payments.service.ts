@@ -7,6 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as Sentry from '@sentry/nestjs';
 import { DeliveryMethodCode, OrderStatus } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -27,7 +28,10 @@ import {
   parseOzonMerchantOrderNumber,
 } from './ozon-merchant-ext-id';
 import { isAllowedOzonPayLink } from './ozon-pay-link.util';
-import { describeOzonFetchError } from './ozon-fetch.util';
+import {
+  describeOzonFetchError,
+  reportOzonNetworkFailure,
+} from './ozon-fetch.util';
 import { carrierItemSku } from '../orders/carrier-item-sku';
 
 export type OzonPaymentLine = {
@@ -130,6 +134,10 @@ export class PaymentsService {
       this.logger.warn(
         `Ozon ${path} network error: ${describeOzonFetchError(err)}`,
       );
+      // Report root cause to Sentry; client 400 is dropped by beforeSend.
+      reportOzonNetworkFailure(err, path, (error, context) => {
+        Sentry.captureException(error, context);
+      });
       throw new BadRequestException(
         'Не удалось связаться с Ozon Pay. Попробуйте позже.',
       );
