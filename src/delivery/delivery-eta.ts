@@ -40,16 +40,14 @@ export function etaFromDayRange(
   minDays: number | null | undefined,
   maxDays: number | null | undefined,
 ): DeliveryEta | null {
-  if (
-    typeof minDays !== 'number' ||
-    typeof maxDays !== 'number' ||
-    !Number.isFinite(minDays) ||
-    !Number.isFinite(maxDays)
-  ) {
-    return null;
-  }
-  const min = Math.max(0, Math.trunc(minDays));
-  const max = Math.max(min, Math.trunc(maxDays));
+  // Otpravka often returns only max-days for short routes (no min-days).
+  const hasMin = typeof minDays === 'number' && Number.isFinite(minDays);
+  const hasMax = typeof maxDays === 'number' && Number.isFinite(maxDays);
+  if (!hasMin && !hasMax) return null;
+  const rawMin = hasMin ? minDays! : maxDays!;
+  const rawMax = hasMax ? maxDays! : minDays!;
+  const min = Math.max(0, Math.trunc(rawMin));
+  const max = Math.max(min, Math.trunc(rawMax));
   const text = formatEtaDays(min, max);
   if (!text) return null;
   return { minDays: min, maxDays: max, text };

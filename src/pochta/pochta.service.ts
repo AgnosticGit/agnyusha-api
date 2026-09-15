@@ -460,8 +460,19 @@ export class PochtaService {
       }
       const data = (await res.json()) as {
         delivery?: { min?: number; max?: number };
+        /** Tariff without VAT, typically kopecks. */
+        pay?: number;
+        /** Tariff with VAT, typically kopecks. */
+        paynds?: number;
       };
-      return etaFromDayRange(data.delivery?.min, data.delivery?.max);
+      const eta = etaFromDayRange(data.delivery?.min, data.delivery?.max);
+      if (!eta) return null;
+      const rawRate = data.pay ?? data.paynds;
+      let price: number | null = null;
+      if (typeof rawRate === 'number' && Number.isFinite(rawRate) && rawRate >= 0) {
+        price = rawRate >= 1000 ? Math.round(rawRate / 100) : Math.round(rawRate);
+      }
+      return { ...eta, price };
     } catch (err) {
       this.logger.warn(
         `Pochta public tariff ETA failed to=${toIndex}: ${

@@ -32,7 +32,18 @@ describe('delivery-eta', () => {
       maxDays: 4,
       text: '2–4 дня',
     });
-    expect(etaFromDayRange(undefined, 3)).toBeNull();
+    // Otpravka short routes often omit min-days.
+    expect(etaFromDayRange(undefined, 3)).toEqual({
+      minDays: 3,
+      maxDays: 3,
+      text: '3 дня',
+    });
+    expect(etaFromDayRange(2, undefined)).toEqual({
+      minDays: 2,
+      maxDays: 2,
+      text: '2 дня',
+    });
+    expect(etaFromDayRange(undefined, undefined)).toBeNull();
   });
 
   it('converts ISO intervals to calendar days', () => {
