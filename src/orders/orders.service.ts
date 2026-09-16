@@ -256,6 +256,17 @@ export class OrdersService {
     const discountAmount = promoApplied?.discountAmount ?? 0;
     const total = promoApplied?.total ?? merchandiseTotal;
 
+    const deliveryMethod = await this.prisma.deliveryMethod.findFirst({
+      where: {
+        code: deliveryCode as DeliveryMethodCode,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    if (!deliveryMethod) {
+      throw new BadRequestException('Выбранный способ доставки недоступен');
+    }
+
     if (deliveryCode === DeliveryMethodCode.YANDEX) {
       if (!pickupCode) {
         throw new BadRequestException('Выберите пункт выдачи Яндекс');

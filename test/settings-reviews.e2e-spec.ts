@@ -58,6 +58,30 @@ describe('Settings + Reviews (e2e)', () => {
     expect(res.body.inventoryEnabled).toBe(true);
   });
 
+  it('hides public reviews when reviewsEnabled is false', async () => {
+    const product = await prisma.product.findFirst({
+      where: { isActive: true },
+    });
+    if (!product) return;
+
+    await request(app.getHttpServer())
+      .patch('/api/admin/settings')
+      .set('Cookie', adminCookie)
+      .send({ reviewsEnabled: false })
+      .expect(200);
+
+    const list = await request(app.getHttpServer())
+      .get(`/api/products/${product.slug}/reviews`)
+      .expect(200);
+    expect(list.body).toMatchObject({ average: 0, count: 0, items: [] });
+
+    await request(app.getHttpServer())
+      .patch('/api/admin/settings')
+      .set('Cookie', adminCookie)
+      .send({ reviewsEnabled: true })
+      .expect(200);
+  });
+
   it('review flow: purchase required', async () => {
     const product = await prisma.product.findFirst({
       where: { isActive: true },

@@ -12,6 +12,8 @@ import {
   OrdersAccessGuard,
   PermissionsGuard,
   ProductsAccessGuard,
+  ReviewsAccessGuard,
+  SettingsAccessGuard,
 } from './auth.guard';
 import { GOOGLE_FETCH } from './google.tokens';
 
@@ -28,6 +30,8 @@ import { GOOGLE_FETCH } from './google.tokens';
     AnalyticsAccessGuard,
     OrdersAccessGuard,
     AdminOnlyGuard,
+    SettingsAccessGuard,
+    ReviewsAccessGuard,
     {
       provide: GOOGLE_FETCH,
       useValue: fetch,
@@ -43,6 +47,8 @@ import { GOOGLE_FETCH } from './google.tokens';
     AnalyticsAccessGuard,
     OrdersAccessGuard,
     AdminOnlyGuard,
+    SettingsAccessGuard,
+    ReviewsAccessGuard,
   ],
 })
 export class AuthModule {}

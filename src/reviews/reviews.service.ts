@@ -4,9 +4,11 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 import {
   REVIEW_ELIGIBLE_STATUSES,
   clampRating,
@@ -17,7 +19,17 @@ import type { CreateReviewDto, UpdateAdminReviewDto } from './dto/review.dto';
 
 @Injectable()
 export class ReviewsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+  ) {}
+
+  private async assertReviewsEnabled() {
+    const { reviewsEnabled } = await this.settings.getPublic();
+    if (!reviewsEnabled) {
+      throw new ServiceUnavailableException('Отзывы временно отключены');
+    }
+  }
 
   private async refreshProductRating(productId: string, tx?: Prisma.TransactionClient) {
     const db = tx ?? this.prisma;
@@ -76,6 +88,16 @@ export class ReviewsService {
     });
     if (!product) throw new NotFoundException('Товар не найден');
 
+    const { reviewsEnabled } = await this.settings.getPublic();
+    if (!reviewsEnabled) {
+      return {
+        productId: product.id,
+        average: 0,
+        count: 0,
+        items: [],
+      };
+    }
+
     const reviews = await this.prisma.productReview.findMany({
       where: { productId: product.id, isHidden: false },
       include: {
@@ -93,6 +115,8 @@ export class ReviewsService {
   }
 
   async canUserReview(userId: string, productId: string): Promise<boolean> {
+    const { reviewsEnabled } = await this.settings.getPublic();
+    if (!reviewsEnabled) return false;
     const existing = await this.prisma.productReview.findUnique({
       where: { userId_productId: { userId, productId } },
     });
@@ -113,6 +137,7 @@ export class ReviewsService {
 
   /** Products the user bought and may still review (account UI). */
   async listEligibleForUser(userId: string) {
+    await this.assertReviewsEnabled();
     const purchased = await this.prisma.orderItem.findMany({
       where: {
         productId: { not: null },
@@ -168,6 +193,7 @@ export class ReviewsService {
   }
 
   async listMine(userId: string) {
+    await this.assertReviewsEnabled();
     const reviews = await this.prisma.productReview.findMany({
       where: { userId },
       include: {
@@ -192,6 +218,7 @@ export class ReviewsService {
   }
 
   async create(userId: string, productIdOrSlug: string, dto: CreateReviewDto) {
+    await this.assertReviewsEnabled();
     const rating = clampRating(dto.rating);
     if (rating == null) throw new BadRequestException('Оценка от 1 до 5');
     const body = dto.body.trim();

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
@@ -48,6 +48,46 @@ export class DeliveryService {
         description: true,
       },
     });
+  }
+
+  adminList() {
+    return this.prisma.deliveryMethod.findMany({
+      orderBy: { sortOrder: 'asc' },
+      select: {
+        id: true,
+        code: true,
+        title: true,
+        description: true,
+        sortOrder: true,
+        isActive: true,
+      },
+    });
+  }
+
+  async updateActiveStates(
+    updates: Array<{ id: string; isActive: boolean }>,
+  ) {
+    const ids = [...new Set(updates.map((u) => u.id.trim()).filter(Boolean))];
+    if (!ids.length) return this.adminList();
+
+    const existing = await this.prisma.deliveryMethod.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+    if (existing.length !== ids.length) {
+      throw new NotFoundException('Способ доставки не найден');
+    }
+
+    const byId = new Map(updates.map((u) => [u.id, Boolean(u.isActive)]));
+    await this.prisma.$transaction(
+      ids.map((id) =>
+        this.prisma.deliveryMethod.update({
+          where: { id },
+          data: { isActive: byId.get(id) ?? true },
+        }),
+      ),
+    );
+    return this.adminList();
   }
 
   async forLocation(

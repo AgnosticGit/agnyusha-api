@@ -1,9 +1,11 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Query, UseGuards } from '@nestjs/common';
+import { SettingsAccessGuard } from '../auth/auth.guard';
 import { DeliveryService } from './delivery.service';
 import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { PochtaService } from '../pochta/pochta.service';
 import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
+import { UpdateAdminDeliveryMethodsDto } from './dto/admin-delivery.dto';
 import {
   DeliveryMethodsQueryDto,
   DeliveryPointsQueryDto,
@@ -31,6 +33,18 @@ export class DeliveryController {
       settlement: query.settlement,
       weightGrams: query.weightGrams,
     });
+  }
+
+  @Get('admin/delivery-methods')
+  @UseGuards(SettingsAccessGuard)
+  adminList() {
+    return this.deliveryService.adminList();
+  }
+
+  @Patch('admin/delivery-methods')
+  @UseGuards(SettingsAccessGuard)
+  adminUpdate(@Body() body: UpdateAdminDeliveryMethodsDto) {
+    return this.deliveryService.updateActiveStates(body.methods);
   }
 
   @Get('cdek/delivery-points')
