@@ -241,7 +241,7 @@ describe('parseLabelTxt', () => {
 2,5 кг
 `);
     expect(cats.category).toBe('CATS');
-    expect(cats.name).toMatch(/кошек/i);
+    expect(cats.name).toBe('Корм для взрослых кошек с белой рыбой');
     expect(cats.subtitle).toBe('Подходит для стерилизованных кошек');
     expect(cats.weightGrams).toBe(2500);
     expect(cats.variants[0]).toMatchObject({

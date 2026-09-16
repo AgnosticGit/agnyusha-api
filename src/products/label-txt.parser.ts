@@ -221,7 +221,7 @@ function inferName(
 
   if (t.includes('котят')) return 'Корм для котят с индейкой и курицей';
   if (t.includes('взрослых кошек') || t.includes('взрослых кош')) {
-    return 'Корм для взрослых кошек';
+    return 'Корм для взрослых кошек с белой рыбой';
   }
 
   const meat =
