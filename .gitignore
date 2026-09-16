@@ -60,9 +60,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .env.development
 .env.production
 
-
-# Local datasets (too large for GitHub; cities come from CDEK/Yandex APIs)
-/data/
 *.csv
 
 # Uploaded product images

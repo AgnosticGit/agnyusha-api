@@ -39,6 +39,7 @@ RUN npm prune --omit=dev \
   && chown -R nestjs:nodejs /app/node_modules
 
 COPY --from=build --chown=nestjs:nodejs /app/dist ./dist
+COPY --from=build --chown=nestjs:nodejs /app/data ./data
 COPY --chown=nestjs:nodejs docker/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
