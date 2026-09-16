@@ -166,7 +166,7 @@ describe('parseLabelTxt', () => {
 - 2,5 кг — 2950 ₽ — высота=42 длина=24 ширина=11
 `.trim());
     expect(parsed.category).toBe('CATS');
-    expect(parsed.name).toMatch(/котят/i);
+    expect(parsed.name).toBe('Корм для котят с индейкой и курицей');
     expect(parsed.variants.map((v) => v.weightGrams)).toEqual([250, 700, 2500]);
     expect(parsed.variants[1]).toMatchObject({
       weightLabel: '700 г.',

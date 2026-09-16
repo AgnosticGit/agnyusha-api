@@ -219,7 +219,7 @@ function inferName(
   const t = productTitle.toLowerCase();
   const text = fullText.toLowerCase();
 
-  if (t.includes('котят')) return 'Корм для котят';
+  if (t.includes('котят')) return 'Корм для котят с индейкой и курицей';
   if (t.includes('взрослых кошек') || t.includes('взрослых кош')) {
     return 'Корм для взрослых кошек';
   }
