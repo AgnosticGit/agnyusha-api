@@ -436,10 +436,24 @@ describe('Delivery tracking poll (e2e)', () => {
         .send({ orderId: order.id })
         .expect(200);
 
+      const deadline = Date.now() + 5_000;
+      while (createCalls < 1 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
       expect(createCalls).toBe(1);
-      const updated = await prisma.order.findUnique({
+
+      let updated = await prisma.order.findUnique({
         where: { id: order.id },
       });
+      while (
+        !updated?.externalDeliveryId &&
+        Date.now() < deadline
+      ) {
+        await new Promise((r) => setTimeout(r, 50));
+        updated = await prisma.order.findUnique({
+          where: { id: order.id },
+        });
+      }
       expect(updated?.externalDeliveryId).toBe('cdek-retry-pay');
       expect(updated?.deliveryTrackNumber).toBe('112233');
 

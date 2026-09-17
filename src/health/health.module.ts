@@ -6,10 +6,11 @@ import { PaymentsModule } from '../payments/payments.module';
 import { AdminHealthController } from './admin-health.controller';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
+import { HostMetricsService } from './host-metrics.service';
 
 @Module({
   imports: [AuthModule, MailModule, PaymentsModule, OrdersModule],
   controllers: [HealthController, AdminHealthController],
-  providers: [HealthService],
+  providers: [HealthService, HostMetricsService],
 })
 export class HealthModule {}

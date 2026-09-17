@@ -371,3 +371,21 @@ model SiteSetting {
 
   @@map("site_settings")
 }
+
+/// Hourly host resource snapshots for admin/health charts (kept ≤ 3 days).
+model HostMetricHourly {
+  id             String   @id @default(cuid())
+  recordedAt     DateTime @map("recorded_at")
+  memTotalMb     Float    @map("mem_total_mb")
+  memAvailableMb Float    @map("mem_available_mb")
+  memUsedPct     Float    @map("mem_used_pct")
+  swapTotalMb    Float    @map("swap_total_mb")
+  swapUsedMb     Float    @map("swap_used_mb")
+  load1          Float
+  diskTotalMb    Float    @map("disk_total_mb")
+  diskUsedPct    Float    @map("disk_used_pct")
+  source         String
+
+  @@index([recordedAt])
+  @@map("host_metric_hourly")
+}

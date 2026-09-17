@@ -29,6 +29,7 @@ export class UsersService {
       email: string;
       role: UserRole;
       bannedAt: Date | null;
+      emailVerifiedAt: Date | null;
       createdAt: Date;
     },
     permissions: StaffPermission[],
@@ -38,12 +39,21 @@ export class UsersService {
       email: user.email,
       role: user.role,
       bannedAt: user.bannedAt,
+      emailVerifiedAt: user.emailVerifiedAt,
       createdAt: user.createdAt,
       permissions:
         user.role === UserRole.USER || user.role === UserRole.ADMIN
           ? []
           : permissions,
     };
+  }
+
+  private assertActivated(user: { emailVerifiedAt: Date | null }) {
+    if (!user.emailVerifiedAt) {
+      throw new ForbiddenException(
+        'Пользователь ещё не активирован — доступны только удаление',
+      );
+    }
   }
 
   async list(params: {
@@ -109,6 +119,8 @@ export class UsersService {
     const target = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!target) throw new NotFoundException('Пользователь не найден');
 
+    this.assertActivated(target);
+
     if (target.email === ROOT_ADMIN_EMAIL && role !== UserRole.ADMIN) {
       throw new ForbiddenException('Нельзя снять роль главного админа');
     }
@@ -171,6 +183,8 @@ export class UsersService {
   ) {
     const target = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!target) throw new NotFoundException('Пользователь не найден');
+
+    this.assertActivated(target);
 
     if (target.email === ROOT_ADMIN_EMAIL) {
       throw new ForbiddenException('Нельзя забанить главного админа');

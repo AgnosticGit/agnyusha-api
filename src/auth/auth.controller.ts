@@ -30,6 +30,7 @@ import {
   createRawToken,
   sessionCookieOptions,
 } from './auth.crypto';
+import { resolveClientIp } from '../common/client-ip';
 import { CartService } from '../cart/cart.service';
 import { AuthGuard, type AuthedRequest } from './auth.guard';
 
@@ -41,14 +42,6 @@ function rawQueryParam(req: Request, name: string): string | undefined {
     name,
   );
   return value ?? undefined;
-}
-
-function clientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.trim()) {
-    return forwarded.split(',')[0].trim();
-  }
-  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
 @Controller('auth')
@@ -82,7 +75,7 @@ export class AuthController {
     @Body() body: RequestMagicLinkDto,
     @Req() req: Request,
   ) {
-    return this.auth.requestMagicLink(body.email, clientIp(req));
+    return this.auth.requestMagicLink(body.email, resolveClientIp(req));
   }
 
   @Post('verify')

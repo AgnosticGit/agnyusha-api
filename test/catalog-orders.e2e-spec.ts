@@ -14,8 +14,8 @@ async function loginAs(
   const prisma = app.get(PrismaService);
   const user = await prisma.user.upsert({
     where: { email },
-    create: { email, role },
-    update: { role },
+    create: { email, role, emailVerifiedAt: new Date() },
+    update: { role, emailVerifiedAt: new Date() },
   });
   const raw = createRawToken();
   await prisma.session.create({
@@ -30,13 +30,20 @@ async function loginAs(
 
 describe('Catalog admin & orders (e2e)', () => {
   let app: INestApplication;
+  let prisma: PrismaService;
+  let skuSeq = 0;
+  const uniqueSku = (prefix: string) =>
+    `${prefix}-${Date.now()}-${++skuSeq}`;
 
   beforeAll(async () => {
     const created = await createTestApp({ cdek: 'missing', yandex: 'missing' });
     app = created.app;
+    prisma = app.get(PrismaService);
+    await setSiteInventoryEnabled(prisma, false);
   });
 
   afterAll(async () => {
+    await setSiteInventoryEnabled(prisma, false);
     await app.close();
   });
 
@@ -107,7 +114,9 @@ describe('Catalog admin & orders (e2e)', () => {
   });
 
   it('admin can create product and user can place order', async () => {
+    await setSiteInventoryEnabled(prisma, false);
     const admin = await loginAs(app, 'admin-e2e@example.com', UserRole.ADMIN);
+    const testSku = uniqueSku('E2E-TEST');
     const create = await request(app.getHttpServer())
       .post('/api/admin/products')
       .set('Cookie', admin.cookie)
@@ -118,7 +127,7 @@ describe('Catalog admin & orders (e2e)', () => {
         badge: 'HIT',
         variants: [
           {
-            sku: 'E2E-TEST-01',
+            sku: testSku,
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -138,7 +147,7 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(create.body.badgeLabel).toBe('Хит');
     expect(create.body.badgeColor).toBe('#5fa88a');
     expect(create.body.isPopular).toBe(true);
-    expect(create.body.variants[0].sku).toBe('E2E-TEST-01');
+    expect(create.body.variants[0].sku).toBe(testSku);
     expect(create.body.variants[0].stock).toBe(10);
     expect(create.body.variants[0].weightGrams).toBe(1000);
 
@@ -150,7 +159,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-XSS-01',
+            sku: uniqueSku('E2E-XSS'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -183,7 +192,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'CATS',
         variants: [
           {
-            sku: 'E2E-BADGE-01',
+            sku: uniqueSku('E2E-BADGE'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -288,6 +297,7 @@ describe('Catalog admin & orders (e2e)', () => {
       'admin-images@example.com',
       UserRole.ADMIN,
     );
+    const imgSku = uniqueSku('E2E-IMG');
     const create = await request(app.getHttpServer())
       .post('/api/admin/products')
       .set('Cookie', admin.cookie)
@@ -296,7 +306,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-IMG-01',
+            sku: imgSku,
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -339,7 +349,7 @@ describe('Catalog admin & orders (e2e)', () => {
         variants: [
           {
             id: create.body.variants[0].id,
-            sku: 'E2E-IMG-01',
+            sku: imgSku,
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -436,6 +446,50 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(empty.body.items).toEqual([]);
   });
 
+  it('admin cannot role/ban unverified user but can delete', async () => {
+    const admin = await loginAs(app, 'agnostex@gmail.com', UserRole.ADMIN);
+    const prisma = app.get(PrismaService);
+    const pending = await prisma.user.upsert({
+      where: { email: 'pending-activate@example.com' },
+      create: {
+        email: 'pending-activate@example.com',
+        role: UserRole.USER,
+        emailVerifiedAt: null,
+      },
+      update: { role: UserRole.USER, emailVerifiedAt: null },
+    });
+
+    const listed = await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .query({ q: 'pending-activate', page: 1, limit: 20 })
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
+    expect(listed.body.items).toHaveLength(1);
+    expect(listed.body.items[0].emailVerifiedAt).toBeNull();
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${pending.id}/role`)
+      .set('Cookie', admin.cookie)
+      .send({ role: 'STAFF', permissions: ['USER_MANAGE'] })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${pending.id}/ban`)
+      .set('Cookie', admin.cookie)
+      .send({ banned: true })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/users/${pending.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
+    expect(
+      await prisma.user.findUnique({ where: { id: pending.id } }),
+    ).toBeNull();
+  });
+
   it('admin can ban and delete user', async () => {
     const admin = await loginAs(app, 'agnostex@gmail.com', UserRole.ADMIN);
     const target = await loginAs(app, 'ban-me@example.com', UserRole.USER);
@@ -501,7 +555,7 @@ describe('Catalog admin & orders (e2e)', () => {
 
   it('staff permissions gate product and inventory APIs', async () => {
     const lead = await loginAs(app, 'lead-e2e@example.com', UserRole.STAFF);
-    const prisma = app.get(PrismaService);
+    await setSiteInventoryEnabled(prisma, false);
     await prisma.userPermission.deleteMany({ where: { userId: lead.user.id } });
     await prisma.userPermission.createMany({
       data: [
@@ -511,8 +565,12 @@ describe('Catalog admin & orders (e2e)', () => {
     });
     const staffUser = await prisma.user.upsert({
       where: { email: 'staff-stock@example.com' },
-      create: { email: 'staff-stock@example.com', role: UserRole.STAFF },
-      update: { role: UserRole.STAFF },
+      create: {
+        email: 'staff-stock@example.com',
+        role: UserRole.STAFF,
+        emailVerifiedAt: new Date(),
+      },
+      update: { role: UserRole.STAFF, emailVerifiedAt: new Date() },
     });
     await prisma.userPermission.deleteMany({ where: { userId: staffUser.id } });
     await prisma.userPermission.create({
@@ -539,7 +597,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'NOPE-01',
+            sku: uniqueSku('NOPE'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -561,7 +619,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'STOCK-GATE-01',
+            sku: uniqueSku('STOCK-GATE'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -711,7 +769,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-PRICE-01',
+            sku: uniqueSku('E2E-PRICE'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -814,7 +872,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-GUEST-01',
+            sku: uniqueSku('E2E-GUEST'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -900,7 +958,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-GUEST-VER-01',
+            sku: uniqueSku('E2E-GUEST-VER'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,

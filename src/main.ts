@@ -8,6 +8,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import { join } from 'path';
 import { AppModule } from './app.module';
+import { createApiRateLimitMiddleware } from './common/api-rate-limit';
 import { createOriginGuard } from './common/origin.guard';
 
 async function bootstrap() {
@@ -16,7 +17,9 @@ async function bootstrap() {
 
   // Keep `+` in query values (needed for OAuth authorization codes).
   app.set('query parser', 'simple');
+  app.set('trust proxy', 1);
   app.use(cookieParser());
+  app.use(createApiRateLimitMiddleware());
   app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads/' });
   app.setGlobalPrefix('api');
 

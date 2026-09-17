@@ -115,6 +115,7 @@ describe('Health (e2e)', () => {
       expect.arrayContaining([
         'database',
         'uploads',
+        'host',
         'cdek',
         'yandex',
         'pochta',
@@ -133,6 +134,7 @@ describe('Health (e2e)', () => {
     );
     expect(byId.database).toBe('ok');
     expect(byId.uploads).toBe('ok');
+    expect(['ok', 'degraded', 'down']).toContain(byId.host);
     expect(byId.cdek).toBe('ok');
     const cdek = (
       res.body.checks as Array<{ id: string; message: string | null }>
@@ -144,5 +146,56 @@ describe('Health (e2e)', () => {
     expect(byId.ozon_pay).toBe('skipped');
     expect(byId.mail).toBe('skipped');
     expect(byId.google_oauth).toBe('ok');
+  });
+
+  it('GET /api/admin/health/metrics returns series for ADMIN', async () => {
+    const { cookie } = await loginAs(
+      app,
+      'health-metrics-admin@example.com',
+      UserRole.ADMIN,
+    );
+    const prisma = app.get(PrismaService);
+    await prisma.hostMetricHourly.create({
+      data: {
+        recordedAt: new Date('2026-09-16T12:00:00.000Z'),
+        memTotalMb: 956,
+        memAvailableMb: 400,
+        memUsedPct: 58,
+        swapTotalMb: 2048,
+        swapUsedMb: 100,
+        load1: 0.2,
+        diskTotalMb: 8000,
+        diskUsedPct: 55,
+        source: 'host',
+      },
+    });
+
+    const res = await request(app.getHttpServer())
+      .get('/api/admin/health/metrics')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(res.body.current).toEqual(
+      expect.objectContaining({
+        memTotalMb: expect.any(Number),
+        memAvailableMb: expect.any(Number),
+        source: expect.stringMatching(/^(host|container)$/),
+      }),
+    );
+    expect(Array.isArray(res.body.live)).toBe(true);
+    expect(Array.isArray(res.body.hourly)).toBe(true);
+    expect(res.body.hourly.length).toBeGreaterThanOrEqual(1);
+    expect(res.body.hourly[0]).toEqual(
+      expect.objectContaining({
+        memAvailableMb: 400,
+        source: 'host',
+      }),
+    );
+  });
+
+  it('GET /api/admin/health/metrics requires auth', async () => {
+    await request(app.getHttpServer())
+      .get('/api/admin/health/metrics')
+      .expect(401);
   });
 });

@@ -9,6 +9,7 @@ import type { OzonDeliveryService } from '../../src/ozon-delivery/ozon-delivery.
 import type { YandexDeliveryService } from '../../src/yandex/yandex-delivery.service';
 import type { DeliveryTrackingPoller } from '../../src/orders/delivery-tracking.poller';
 import type { DeliveryPollSnapshot } from '../../src/orders/delivery-poll.util';
+import type { HostMetricsService } from '../../src/health/host-metrics.service';
 
 type Deps = {
   prisma: { $queryRaw: jest.Mock };
@@ -32,6 +33,7 @@ type Deps = {
   auth: { isGoogleConfigured: jest.Mock };
   mail: { isConfigured: jest.Mock };
   poller: { snapshot: jest.Mock };
+  hostMetrics: { evaluateCurrent: jest.Mock };
 };
 
 function idleSnapshot(
@@ -99,6 +101,26 @@ function makeService(overrides: Partial<Deps> = {}) {
         ),
       ...overrides.poller,
     },
+    hostMetrics: {
+      evaluateCurrent: jest.fn().mockResolvedValue({
+        status: 'ok',
+        message:
+          'RAM available 420MB / 956MB · swap 200MB · load 0.3 · disk 60% · source=host',
+        snapshot: {
+          at: '2026-09-17T12:00:00.000Z',
+          memTotalMb: 956,
+          memAvailableMb: 420,
+          memUsedPct: 56,
+          swapTotalMb: 2048,
+          swapUsedMb: 200,
+          load1: 0.3,
+          diskTotalMb: 8600,
+          diskUsedPct: 60,
+          source: 'host',
+        },
+      }),
+      ...overrides.hostMetrics,
+    },
   };
 
   const service = new HealthService(
@@ -111,6 +133,7 @@ function makeService(overrides: Partial<Deps> = {}) {
     deps.auth as unknown as AuthService,
     deps.mail as unknown as ResendMailService,
     deps.poller as unknown as DeliveryTrackingPoller,
+    deps.hostMetrics as unknown as HostMetricsService,
   );
 
   return { service, deps };
@@ -162,6 +185,7 @@ describe('HealthService', () => {
       expect(report.checks.map((c) => c.id)).toEqual([
         'database',
         'uploads',
+        'host',
         'cdek',
         'yandex',
         'pochta',
@@ -175,6 +199,35 @@ describe('HealthService', () => {
           .filter((c) => c.configured === false)
           .every((c) => c.status === 'skipped'),
       ).toBe(true);
+    });
+
+    it('includes host check from HostMetricsService', async () => {
+      const { service, deps } = makeService();
+      const report = await service.fullReport();
+      expect(report.checks.find((c) => c.id === 'host')).toMatchObject({
+        status: 'ok',
+        critical: false,
+        configured: true,
+        message: expect.stringContaining('source=host'),
+      });
+      expect(deps.hostMetrics.evaluateCurrent).toHaveBeenCalled();
+    });
+
+    it('is degraded when host reports degraded', async () => {
+      const { service } = makeService({
+        hostMetrics: {
+          evaluateCurrent: jest.fn().mockResolvedValue({
+            status: 'degraded',
+            message: 'RAM available 50MB / 956MB · source=host',
+            snapshot: {},
+          }),
+        },
+      });
+      const report = await service.fullReport();
+      expect(report.status).toBe('degraded');
+      expect(report.checks.find((c) => c.id === 'host')?.status).toBe(
+        'degraded',
+      );
     });
 
     it('is down when a critical check is down', async () => {

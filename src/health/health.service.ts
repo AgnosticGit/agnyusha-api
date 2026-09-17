@@ -23,6 +23,7 @@ import type {
   HealthReport,
   HealthStatus,
 } from './health.types';
+import { HostMetricsService } from './host-metrics.service';
 
 const PROBE_TIMEOUT_MS = 5_000;
 
@@ -40,6 +41,7 @@ export class HealthService {
     private readonly auth: AuthService,
     private readonly mail: ResendMailService,
     private readonly poller: DeliveryTrackingPoller,
+    private readonly hostMetrics: HostMetricsService,
   ) {}
 
   live() {
@@ -56,6 +58,7 @@ export class HealthService {
     const checks = await Promise.all([
       this.checkDatabase(),
       this.checkUploadsDisk(),
+      this.checkHost(),
       this.checkCdek(),
       this.checkYandex(),
       this.checkPochta(),
@@ -139,6 +142,13 @@ export class HealthService {
       await mkdir(dir, { recursive: true });
       await access(dir, constants.R_OK | constants.W_OK);
       return { status: 'ok', message: dir };
+    });
+  }
+
+  private checkHost(): Promise<HealthCheckItem> {
+    return this.runCheck('host', 'Сервер (RAM / диск)', false, true, async () => {
+      const { status, message } = await this.hostMetrics.evaluateCurrent();
+      return { status, message };
     });
   }
 
