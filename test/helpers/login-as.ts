@@ -28,10 +28,11 @@ export async function loginAs(
   const permissions = opts.permissions ?? [];
 
   const prisma = app.get(PrismaService);
+  const privacyConsentAt = new Date();
   const user = await prisma.user.upsert({
     where: { email },
-    create: { email, role, emailVerifiedAt },
-    update: { role, emailVerifiedAt },
+    create: { email, role, emailVerifiedAt, privacyConsentAt },
+    update: { role, emailVerifiedAt, privacyConsentAt },
   });
 
   await prisma.userPermission.deleteMany({ where: { userId: user.id } });

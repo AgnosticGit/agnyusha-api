@@ -17,6 +17,7 @@ import {
   canAccessSystemHealth,
   canManageArticles,
   canManageOrders,
+  canManagePickup,
   canManagePromos,
   canManageReviews,
   canManageSettings,
@@ -228,6 +229,20 @@ export class SettingsAccessGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const user = await requireUser(this.auth, req);
     if (!canManageSettings(user)) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+    return true;
+  }
+}
+
+@Injectable()
+export class PickupAccessGuard implements CanActivate {
+  constructor(private readonly auth: AuthService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<AuthedRequest>();
+    const user = await requireUser(this.auth, req);
+    if (!canManagePickup(user)) {
       throw new ForbiddenException('Недостаточно прав');
     }
     return true;

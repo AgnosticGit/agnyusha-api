@@ -25,6 +25,15 @@ function cookieHeader(setCookie: string | string[] | undefined): string {
   return raw.map((c) => c.split(';')[0]).join('; ');
 }
 
+function joinCookies(
+  ...parts: Array<string | string[] | undefined>
+): string {
+  return parts
+    .map(cookieHeader)
+    .filter(Boolean)
+    .join('; ');
+}
+
 describe('Auth magic link (e2e)', () => {
   let app: INestApplication;
   let sent: SendMailInput[];
@@ -68,7 +77,7 @@ describe('Auth magic link (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
-      .send({ email: 'auth-test@example.com' })
+      .send({ email: 'auth-test@example.com', privacyConsent: true })
       .expect(200)
       .expect({ ok: true });
 
@@ -108,6 +117,25 @@ describe('Auth magic link (e2e)', () => {
     expect(meAfter.body.user).toBeNull();
   });
 
+  it('rejects magic-link without privacy consent for new users', async () => {
+    await request(app.getHttpServer())
+      .post('/api/auth/magic-link')
+      .send({ email: 'no-consent@example.com' })
+      .expect(400);
+  });
+
+  it('sets privacy consent cookie for Google OAuth', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/privacy-consent')
+      .send({ privacyConsent: true })
+      .expect(200)
+      .expect({ ok: true });
+
+    expect(String(res.headers['set-cookie'])).toContain(
+      'agnyusha_privacy_consent=1',
+    );
+  });
+
   it('rejects invalid token', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/verify')
@@ -119,7 +147,7 @@ describe('Auth magic link (e2e)', () => {
     sent.length = 0;
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
-      .send({ email: 'auth-reuse@example.com' })
+      .send({ email: 'auth-reuse@example.com', privacyConsent: true })
       .expect(200);
     const token = extractToken(sent[0].text);
 
@@ -138,7 +166,7 @@ describe('Auth magic link (e2e)', () => {
     sent.length = 0;
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
-      .send({ email: 'auth-expire@example.com' })
+      .send({ email: 'auth-expire@example.com', privacyConsent: true })
       .expect(200);
     const token = extractToken(sent[0].text);
 
@@ -158,13 +186,13 @@ describe('Auth magic link (e2e)', () => {
     sent.length = 0;
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
-      .send({ email: 'auth-cooldown@example.com' })
+      .send({ email: 'auth-cooldown@example.com', privacyConsent: true })
       .expect(200);
     expect(sent).toHaveLength(1);
 
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
-      .send({ email: 'auth-cooldown@example.com' })
+      .send({ email: 'auth-cooldown@example.com', privacyConsent: true })
       .expect(200)
       .expect({ ok: true });
 
@@ -174,7 +202,7 @@ describe('Auth magic link (e2e)', () => {
   it('rejects invalid email payload', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
-      .send({ email: 'not-an-email' })
+      .send({ email: 'not-an-email', privacyConsent: true })
       .expect(400);
   });
 
@@ -182,7 +210,7 @@ describe('Auth magic link (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
       .set('Origin', 'https://evil.example')
-      .send({ email: 'origin-block@example.com' })
+      .send({ email: 'origin-block@example.com', privacyConsent: true })
       .expect(403);
   });
 
@@ -200,7 +228,7 @@ describe('Auth magic link (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
-      .send({ email })
+      .send({ email, privacyConsent: true })
       .expect(200);
     const token = extractToken(sent[0].text);
     const verify = await request(app.getHttpServer())
@@ -237,7 +265,7 @@ describe('Auth magic link (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
-      .send({ email })
+      .send({ email, privacyConsent: true })
       .expect(200);
     const token = extractToken(sent[0].text);
     const verify = await request(app.getHttpServer())
@@ -268,7 +296,7 @@ describe('Auth magic link (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/auth/magic-link')
-      .send({ email })
+      .send({ email, privacyConsent: true })
       .expect(200);
     const token = extractToken(sent[0].text);
     const verify = await request(app.getHttpServer())
@@ -296,7 +324,38 @@ describe('Auth Google OAuth (e2e)', () => {
     if (app) await app.close();
   });
 
-  it('redirects to Google with state cookie', async () => {
+  it('redirects to Google with state cookie after privacy consent', async () => {
+    const created = await createTestApp({
+      cdek: 'missing',
+      yandex: 'missing',
+      google: 'present',
+      googleFetch: async () => {
+        throw new Error('Google fetch should not be called on start');
+      },
+    });
+    app = created.app;
+
+    const consent = await request(app.getHttpServer())
+      .post('/api/auth/privacy-consent')
+      .send({ privacyConsent: true })
+      .expect(200);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/auth/google')
+      .set('Cookie', cookieHeader(consent.headers['set-cookie']))
+      .expect(302);
+
+    const location = String(res.headers.location);
+    expect(location).toContain('accounts.google.com');
+    expect(location).toContain('client_id=test-google-client-id');
+    expect(location).toContain('state=');
+    expect(res.headers['set-cookie']).toBeDefined();
+    expect(String(res.headers['set-cookie'])).toContain(
+      'agnyusha_oauth_state=',
+    );
+  });
+
+  it('blocks Google start without privacy consent cookie', async () => {
     const created = await createTestApp({
       cdek: 'missing',
       yandex: 'missing',
@@ -311,13 +370,8 @@ describe('Auth Google OAuth (e2e)', () => {
       .get('/api/auth/google')
       .expect(302);
 
-    const location = String(res.headers.location);
-    expect(location).toContain('accounts.google.com');
-    expect(location).toContain('client_id=test-google-client-id');
-    expect(location).toContain('state=');
-    expect(res.headers['set-cookie']).toBeDefined();
-    expect(String(res.headers['set-cookie'])).toContain(
-      'agnyusha_oauth_state=',
+    expect(String(res.headers.location)).toContain(
+      '/auth/callback?error=privacy_consent',
     );
   });
 
@@ -383,8 +437,15 @@ describe('Auth Google OAuth (e2e)', () => {
       where: { email: 'google-user@example.com' },
     });
 
+    const consent = await request(app.getHttpServer())
+      .post('/api/auth/privacy-consent')
+      .send({ privacyConsent: true })
+      .expect(200);
+    const consentCookie = cookieHeader(consent.headers['set-cookie']);
+
     const start = await request(app.getHttpServer())
       .get('/api/auth/google')
+      .set('Cookie', consentCookie)
       .expect(302);
 
     const startCookie = start.headers['set-cookie'];
@@ -395,7 +456,7 @@ describe('Auth Google OAuth (e2e)', () => {
     const callback = await request(app.getHttpServer())
       .get('/api/auth/google/callback')
       .query({ code: 'auth-code', state })
-      .set('Cookie', startCookie)
+      .set('Cookie', joinCookies(startCookie, consentCookie))
       .expect(302);
 
     expect(callback.headers.location).toBe('http://localhost:3000/');
@@ -411,6 +472,7 @@ describe('Auth Google OAuth (e2e)', () => {
       .expect(200);
 
     expect(me.body.user.email).toBe('google-user@example.com');
+    expect(me.body.user.privacyConsentAt).toBeTruthy();
   });
 
   it('completes Google callback with plus-containing auth code', async () => {
@@ -456,8 +518,15 @@ describe('Auth Google OAuth (e2e)', () => {
     });
     app = created.app;
 
+    const consent = await request(app.getHttpServer())
+      .post('/api/auth/privacy-consent')
+      .send({ privacyConsent: true })
+      .expect(200);
+    const consentCookie = cookieHeader(consent.headers['set-cookie']);
+
     const start = await request(app.getHttpServer())
       .get('/api/auth/google')
+      .set('Cookie', consentCookie)
       .expect(302);
     const startCookie = start.headers['set-cookie'];
     const location = new URL(String(start.headers.location));
@@ -467,7 +536,7 @@ describe('Auth Google OAuth (e2e)', () => {
       .get(
         `/api/auth/google/callback?code=${encodeURIComponent('4/0A+abc_def')}&state=${encodeURIComponent(state!)}`,
       )
-      .set('Cookie', startCookie)
+      .set('Cookie', joinCookies(startCookie, consentCookie))
       .expect(302);
 
     expect(callback.headers.location).toBe('http://localhost:3000/');
@@ -522,8 +591,15 @@ describe('Auth Google OAuth (e2e)', () => {
     });
     app = created.app;
 
+    const consent = await request(app.getHttpServer())
+      .post('/api/auth/privacy-consent')
+      .send({ privacyConsent: true })
+      .expect(200);
+    const consentCookie = cookieHeader(consent.headers['set-cookie']);
+
     const start = await request(app.getHttpServer())
       .get('/api/auth/google')
+      .set('Cookie', consentCookie)
       .expect(302);
     const startCookie = start.headers['set-cookie'];
     const state = new URL(String(start.headers.location)).searchParams.get(
@@ -533,7 +609,7 @@ describe('Auth Google OAuth (e2e)', () => {
     const callback = await request(app.getHttpServer())
       .get('/api/auth/google/callback')
       .query({ code: 'auth-code', state })
-      .set('Cookie', startCookie)
+      .set('Cookie', joinCookies(startCookie, consentCookie))
       .expect(302);
 
     expect(callback.headers.location).toContain(

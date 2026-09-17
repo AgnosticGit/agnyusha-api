@@ -150,6 +150,7 @@ export class AuthService {
     id: string;
     email: string;
     emailVerifiedAt?: Date | null;
+    privacyConsentAt?: Date | null;
     phone?: string | null;
     lastName?: string | null;
     firstName?: string | null;
@@ -159,6 +160,7 @@ export class AuthService {
       id: user.id,
       email: user.email,
       emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
+      privacyConsentAt: user.privacyConsentAt?.toISOString() ?? null,
       phone: user.phone ?? '',
       lastName: user.lastName ?? '',
       firstName: user.firstName ?? '',
@@ -174,6 +176,7 @@ export class AuthService {
       role: AuthUser['role'];
       bannedAt?: Date | null;
       emailVerifiedAt?: Date | null;
+      privacyConsentAt?: Date | null;
       phone?: string | null;
       lastName?: string | null;
       firstName?: string | null;
@@ -242,8 +245,9 @@ export class AuthService {
 
   async requestMagicLink(
     emailRaw: string,
-    clientIp = 'unknown',
+    opts: { clientIp?: string; privacyConsent?: boolean } = {},
   ): Promise<{ ok: true }> {
+    const clientIp = opts.clientIp ?? 'unknown';
     if (!this.magicLinkIpLimiter.tryConsume(clientIp || 'unknown')) {
       throw new HttpException(
         'Слишком много запросов. Попробуйте позже.',
@@ -256,10 +260,23 @@ export class AuthService {
       throw new BadRequestException('Укажите email');
     }
 
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (!existing?.privacyConsentAt && opts.privacyConsent !== true) {
+      throw new BadRequestException(
+        'Нужно согласие на обработку персональных данных',
+      );
+    }
+
+    const now = new Date();
     const user = await this.prisma.user.upsert({
       where: { email },
-      create: { email },
-      update: {},
+      create: {
+        email,
+        privacyConsentAt: now,
+      },
+      update: existing?.privacyConsentAt
+        ? {}
+        : { privacyConsentAt: now },
     });
 
     // Don't reveal ban status; silently no-op for banned accounts.
@@ -280,7 +297,6 @@ export class AuthService {
 
     const rawToken = createRawToken();
     const expiresAt = new Date(Date.now() + this.magicLinkTtlMs());
-    const now = new Date();
 
     await this.prisma.$transaction([
       this.prisma.magicLink.updateMany({
@@ -346,7 +362,10 @@ export class AuthService {
     return this.createSessionForUser(magic.user);
   }
 
-  async loginWithGoogleCode(code: string): Promise<{
+  async loginWithGoogleCode(
+    code: string,
+    opts: { privacyConsent?: boolean } = {},
+  ): Promise<{
     sessionToken: string;
     user: AuthUser;
     maxAgeMs: number;
@@ -430,11 +449,25 @@ export class AuthService {
 
     const user = await this.prisma.user.upsert({
       where: { email },
-      create: { email, emailVerifiedAt: new Date() },
+      create: {
+        email,
+        emailVerifiedAt: new Date(),
+        privacyConsentAt: opts.privacyConsent ? new Date() : null,
+      },
       update: {
         emailVerifiedAt: { set: new Date() },
+        ...(opts.privacyConsent
+          ? { privacyConsentAt: { set: new Date() } }
+          : {}),
       },
     });
+
+    if (!user.privacyConsentAt) {
+      throw new GoogleOAuthError(
+        'privacy_consent',
+        'Нужно согласие на обработку персональных данных',
+      );
+    }
 
     return this.createSessionForUser(user);
   }

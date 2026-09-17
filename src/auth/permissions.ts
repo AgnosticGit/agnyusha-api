@@ -19,6 +19,7 @@ export const ALL_STAFF_PERMISSIONS: StaffPermission[] = [
   StaffPermission.PROMO_MANAGE,
   StaffPermission.REVIEW_MANAGE,
   StaffPermission.SETTINGS_MANAGE,
+  StaffPermission.PICKUP_MANAGE,
 ];
 
 export function isStaffRole(role: UserRole): boolean {
@@ -82,6 +83,12 @@ export function canManageSettings(
   user: Pick<AuthUser, 'role' | 'permissions'>,
 ): boolean {
   return hasPermission(user, StaffPermission.SETTINGS_MANAGE);
+}
+
+export function canManagePickup(
+  user: Pick<AuthUser, 'role' | 'permissions'>,
+): boolean {
+  return hasPermission(user, StaffPermission.PICKUP_MANAGE);
 }
 
 /** System health / ops monitoring — ADMIN only. */

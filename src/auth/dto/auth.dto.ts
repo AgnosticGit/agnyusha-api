@@ -1,5 +1,8 @@
 import {
+  Equals,
+  IsBoolean,
   IsEmail,
+  IsOptional,
   IsString,
   MaxLength,
   MinLength,
@@ -8,6 +11,17 @@ import {
 export class RequestMagicLinkDto {
   @IsEmail({}, { message: 'Укажите корректный email' })
   email!: string;
+
+  /** Required for users who have not yet accepted personal-data processing. */
+  @IsOptional()
+  @IsBoolean()
+  privacyConsent?: boolean;
+}
+
+export class PrivacyConsentDto {
+  @IsBoolean()
+  @Equals(true, { message: 'Нужно согласие на обработку персональных данных' })
+  privacyConsent!: boolean;
 }
 
 export class VerifyMagicLinkDto {

@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { testStorePickupAt } from './helpers/pickup-slot';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
 import {
@@ -122,6 +123,7 @@ describe('Ozon Pay (e2e)', () => {
           cityLabel: 'Санкт-Петербург',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           total: 100,
           items: {
             create: [
@@ -198,6 +200,7 @@ describe('Ozon Pay (e2e)', () => {
           cityLabel: 'Санкт-Петербург',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           total: 100,
           paymentExternalId: 'ozon-pay-only-id',
           items: {
@@ -260,6 +263,7 @@ describe('Ozon Pay (e2e)', () => {
           cityLabel: 'Санкт-Петербург',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           total: 100,
           paymentExternalId: '01a08802-365e-7678-a56c-6698bce490d9',
           items: {
@@ -379,13 +383,15 @@ describe('Ozon Pay (e2e)', () => {
           cityLabel: 'Санкт-Петербург',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           items: [
             {
               variantId: product.variants[0].id,
               qty: 1,
             },
           ],
-        })
+        privacyConsent: true,
+      })
         .expect(201);
 
       expect(order.body.payUrl).toBe(
@@ -491,13 +497,15 @@ describe('Ozon Pay (e2e)', () => {
           cityLabel: 'Санкт-Петербург',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           items: [
             {
               variantId: product.variants[0].id,
               qty: 1,
             },
           ],
-        })
+        privacyConsent: true,
+      })
         .expect(400);
 
       expect(res.body.message).toMatch(/Ozon Pay/i);
@@ -582,8 +590,10 @@ describe('Ozon Pay (e2e)', () => {
           cityLabel: 'Санкт-Петербург',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           items: [{ variantId: product.variants[0].id, qty: 1 }],
-        })
+        privacyConsent: true,
+      })
         .expect(201);
 
       expect(sent).toHaveLength(1);
@@ -703,6 +713,7 @@ describe('Ozon Pay (e2e)', () => {
           cityLabel: 'Москва',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           paymentExternalId: 'ozon-resume-1',
           paymentPayLink: 'https://checkout.ozon.ru/order/ozon-resume-1',
           total: 1,
@@ -897,6 +908,7 @@ describe('Ozon Pay (e2e)', () => {
           cityLabel: 'Санкт-Петербург',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           total: 100,
           items: {
             create: [

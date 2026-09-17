@@ -7,6 +7,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { PromosModule } from '../promos/promos.module';
 import { SettingsCoreModule } from '../settings/settings-core.module';
 import { YandexModule } from '../yandex/yandex.module';
+import { PickupModule } from '../pickup/pickup.module';
 import { DeliveryTrackingPoller } from './delivery-tracking.poller';
 import { OrdersController, AdminOrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
@@ -21,6 +22,7 @@ import { OrdersService } from './orders.service';
     MailModule,
     PromosModule,
     SettingsCoreModule,
+    PickupModule,
   ],
   controllers: [OrdersController, AdminOrdersController],
   providers: [OrdersService, DeliveryTrackingPoller],

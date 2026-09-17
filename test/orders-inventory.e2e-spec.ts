@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { testStorePickupAt } from './helpers/pickup-slot';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
 import {
@@ -80,6 +81,8 @@ describe('Orders inventory (e2e)', () => {
       cityLabel: 'Санкт-Петербург',
       deliveryCode: 'PICKUP',
       deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
+      privacyConsent: true,
       items: [
         {
           productId: product.id,

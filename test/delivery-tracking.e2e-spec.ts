@@ -127,7 +127,8 @@ describe('Delivery tracking poll (e2e)', () => {
           pickupLabel: 'ПВЗ тест',
           pickupCode: 'MSK99',
           items: [{ variantId: product.variants[0].id, qty: 1 }],
-        })
+        privacyConsent: true,
+      })
         .expect(201);
 
       expect(created.body.externalDeliveryId).toBe('cdek-uuid-1');

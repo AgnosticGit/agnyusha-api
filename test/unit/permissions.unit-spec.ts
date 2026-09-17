@@ -34,6 +34,7 @@ describe('permissions', () => {
         StaffPermission.PROMO_MANAGE,
         StaffPermission.REVIEW_MANAGE,
         StaffPermission.SETTINGS_MANAGE,
+        StaffPermission.PICKUP_MANAGE,
       ]);
     });
   });

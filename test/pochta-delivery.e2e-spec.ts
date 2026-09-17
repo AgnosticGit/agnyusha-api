@@ -205,6 +205,7 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
         pickupCode: '190000',
         pickupLabel: 'ОПС 190000 — Санкт-Петербург, Невский пр., 1',
         items: [{ variantId: product.variants[0].id, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(201);
 

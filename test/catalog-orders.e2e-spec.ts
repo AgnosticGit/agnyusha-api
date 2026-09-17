@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { testStorePickupAt } from './helpers/pickup-slot';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
 import { createTestApp, setSiteInventoryEnabled } from './helpers/cdek-test.helpers';
@@ -248,6 +249,7 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [
           {
             productId: create.body.id,
@@ -259,6 +261,7 @@ describe('Catalog admin & orders (e2e)', () => {
             qty: 2,
           },
         ],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -687,6 +690,7 @@ describe('Catalog admin & orders (e2e)', () => {
           cityLabel: 'Москва',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           items: [
             {
               productId: created.body.id,
@@ -698,7 +702,8 @@ describe('Catalog admin & orders (e2e)', () => {
               qty: 99,
             },
           ],
-        })
+        privacyConsent: true,
+      })
         .expect(400);
     } finally {
       await setSiteInventoryEnabled(prisma, false);
@@ -803,6 +808,7 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [
           {
             variantId: created.body.variants[0].id,
@@ -813,6 +819,7 @@ describe('Catalog admin & orders (e2e)', () => {
             qty: 2,
           },
         ],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -832,7 +839,9 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId: 'missing-variant', qty: 1 }],
+        privacyConsent: true,
       })
       .expect(400);
 
@@ -854,7 +863,9 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(400);
 
@@ -903,7 +914,9 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -925,6 +938,7 @@ describe('Catalog admin & orders (e2e)', () => {
     });
     expect(account?.emailVerifiedAt).toBeNull();
     expect(account?.lastName).toBe('Иванов');
+    expect(account?.privacyConsentAt).toBeTruthy();
 
     const mine = await request(app.getHttpServer())
       .get('/api/orders')
@@ -933,6 +947,56 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(mine.body.items.some((o: { id: string }) => o.id === order.body.id)).toBe(
       true,
     );
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${created.body.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+  });
+
+  it('rejects guest order without privacy consent', async () => {
+    const admin = await loginAs(
+      app,
+      'admin-guest-consent@example.com',
+      UserRole.ADMIN,
+    );
+    const created = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Consent Gate',
+        category: 'DOGS',
+        variants: [
+          {
+            sku: uniqueSku('E2E-CONSENT'),
+            weight: '1 кг.',
+            weightGrams: 1000,
+            lengthCm: 20,
+            widthCm: 15,
+            heightCm: 10,
+            price: 500,
+            stock: 2,
+          },
+        ],
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .send({
+        email: 'no-consent-guest@example.com',
+        lastName: 'Иванов',
+        firstName: 'Иван',
+        phone: '+7 (900) 555-00-11',
+        contactChannel: 'WhatsApp',
+        cityLabel: 'Санкт-Петербург',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
+        items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+      })
+      .expect(400);
 
     await request(app.getHttpServer())
       .delete(`/api/admin/products/${created.body.id}`)
@@ -993,7 +1057,9 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Москва',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(400);
 

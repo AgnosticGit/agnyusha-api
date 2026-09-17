@@ -4,6 +4,7 @@ import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { PochtaService } from '../pochta/pochta.service';
 import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
+import { PickupService } from '../pickup/pickup.service';
 import { withTimeout } from '../common/http-utils';
 import { mapDeliveryAvailability } from './delivery-availability';
 import {
@@ -12,6 +13,7 @@ import {
   type DeliveryEta,
   type DeliveryMethodWithEta,
 } from './delivery-eta';
+import { scheduleSummary } from '../pickup/pickup.util';
 
 /** Cap per-carrier ETA so one hung API cannot block checkout method list. */
 export const DELIVERY_ETA_TIMEOUT_MS = 4_000;
@@ -40,6 +42,7 @@ export class DeliveryService {
     private readonly yandex: YandexDeliveryService,
     private readonly pochta: PochtaService,
     private readonly ozonDelivery: OzonDeliveryService,
+    private readonly pickup: PickupService,
   ) {}
 
   private listUncached() {
@@ -121,6 +124,13 @@ export class DeliveryService {
   ): Promise<DeliveryMethodWithEta[]> {
     const { region, label } = query;
     const methods = await this.list();
+    let pickupNote: string | undefined;
+    try {
+      const settings = await this.pickup.getSettings();
+      pickupNote = `${settings.address} · ${scheduleSummary(settings.schedule)}`;
+    } catch {
+      pickupNote = undefined;
+    }
     const mapped = mapDeliveryAvailability(methods, {
       region,
       label,
@@ -129,6 +139,7 @@ export class DeliveryService {
       ozonReady: this.ozonDelivery.isOrderCreationConfigured(),
       yandexOrderReady: this.yandex.isOrderCreationConfigured(),
       yandexMoscowOnly: this.yandex.isTestEnvironment(),
+      pickupNote,
     });
 
     const weightGrams = Math.max(

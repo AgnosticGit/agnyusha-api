@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { testStorePickupAt } from './helpers/pickup-slot';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
 import { createTestApp, setSiteInventoryEnabled } from './helpers/cdek-test.helpers';
@@ -465,7 +466,9 @@ describe('Cart guest persist & merge (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId, qty: 2 }],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -496,7 +499,9 @@ describe('Cart guest persist & merge (e2e)', () => {
         cityLabel: 'Москва',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -532,7 +537,9 @@ describe('Cart guest persist & merge (e2e)', () => {
         cityLabel: 'Казань',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(201);
 

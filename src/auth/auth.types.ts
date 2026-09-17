@@ -4,6 +4,7 @@ export type AuthUser = {
   id: string;
   email: string;
   emailVerifiedAt: string | null;
+  privacyConsentAt: string | null;
   phone: string;
   lastName: string;
   firstName: string;

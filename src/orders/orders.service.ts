@@ -29,6 +29,7 @@ import {
 } from '../mail/order-done';
 import { PromosService } from '../promos/promos.service';
 import { SettingsService } from '../settings/settings.service';
+import { PickupService } from '../pickup/pickup.service';
 import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
 import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
 import { YandexEntityNotFoundError } from '../yandex/yandex.errors';
@@ -70,6 +71,7 @@ export class OrdersService {
     private readonly payments: PaymentsService,
     private readonly promos: PromosService,
     private readonly settings: SettingsService,
+    private readonly pickup: PickupService,
     private readonly config: ConfigService,
     @Inject(MAIL_SEND) private readonly sendMail: MailSend,
   ) {}
@@ -202,7 +204,12 @@ export class OrdersService {
     const sessionUser = sessionUserId
       ? await this.prisma.user.findUnique({
           where: { id: sessionUserId },
-          select: { id: true, email: true, emailVerifiedAt: true },
+          select: {
+            id: true,
+            email: true,
+            emailVerifiedAt: true,
+            privacyConsentAt: true,
+          },
         })
       : null;
     if (sessionUserId && !sessionUser) {
@@ -219,6 +226,7 @@ export class OrdersService {
       firstName,
     });
 
+    const consentNow = new Date();
     const owner = sessionUser
       ? sessionUser
       : await (async () => {
@@ -231,10 +239,27 @@ export class OrdersService {
                 'Этот email уже зарегистрирован. Войдите в аккаунт, чтобы оформить заказ.',
               );
             }
+            if (!existing.privacyConsentAt && dto.privacyConsent !== true) {
+              throw new BadRequestException(
+                'Нужно согласие на обработку персональных данных',
+              );
+            }
             return this.prisma.user.update({
               where: { id: existing.id },
-              data: { phone, lastName, firstName },
+              data: {
+                phone,
+                lastName,
+                firstName,
+                ...(existing.privacyConsentAt
+                  ? {}
+                  : { privacyConsentAt: consentNow }),
+              },
             });
+          }
+          if (dto.privacyConsent !== true) {
+            throw new BadRequestException(
+              'Нужно согласие на обработку персональных данных',
+            );
           }
           return this.prisma.user.create({
             data: {
@@ -242,17 +267,30 @@ export class OrdersService {
               phone,
               lastName,
               firstName,
+              privacyConsentAt: consentNow,
             },
           });
         })();
 
     const establishSessionUserId = sessionUser ? null : owner.id;
 
-    // Logged-in user: keep profile in sync with checkout.
+    // Logged-in user: keep profile in sync with checkout (+ consent if missing).
     if (sessionUser) {
+      if (!sessionUser.privacyConsentAt && dto.privacyConsent !== true) {
+        throw new BadRequestException(
+          'Нужно согласие на обработку персональных данных',
+        );
+      }
       await this.prisma.user.update({
         where: { id: sessionUser.id },
-        data: { phone, lastName, firstName },
+        data: {
+          phone,
+          lastName,
+          firstName,
+          ...(sessionUser.privacyConsentAt
+            ? {}
+            : { privacyConsentAt: consentNow }),
+        },
       });
     }
 
@@ -319,6 +357,22 @@ export class OrdersService {
       }
     }
 
+    let storePickupAt: Date | null = null;
+    let storePickupAddress: string | null = null;
+    if (deliveryCode === DeliveryMethodCode.PICKUP) {
+      const raw = dto.storePickupAt?.trim();
+      if (!raw) {
+        throw new BadRequestException('Выберите дату и время самовывоза');
+      }
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException('Некорректная дата самовывоза');
+      }
+      const settings = await this.pickup.assertValidSlot(parsed);
+      storePickupAt = parsed;
+      storePickupAddress = settings.address;
+    }
+
     const order = await this.prisma.$transaction(async (tx) => {
       if (promoApplied?.promoCodeId) {
         await this.promos.incrementRedemption(promoApplied.promoCodeId, tx);
@@ -357,6 +411,8 @@ export class OrdersService {
           deliveryTitle: dto.deliveryTitle.trim(),
           pickupLabel: dto.pickupLabel?.trim() || null,
           pickupCode,
+          storePickupAt,
+          storePickupAddress,
           subtotal,
           discountAmount,
           promoCodeId: promoApplied?.promoCodeId ?? null,
@@ -1273,6 +1329,8 @@ export class OrdersService {
     deliveryTitle: string;
     pickupLabel: string | null;
     pickupCode?: string | null;
+    storePickupAt?: Date | null;
+    storePickupAddress?: string | null;
     externalDeliveryId?: string | null;
     deliveryTrackNumber?: string | null;
     deliveryStatusCode?: string | null;
@@ -1316,6 +1374,8 @@ export class OrdersService {
       deliveryTitle: order.deliveryTitle,
       pickupLabel: order.pickupLabel,
       pickupCode: order.pickupCode ?? null,
+      storePickupAt: order.storePickupAt?.toISOString() ?? null,
+      storePickupAddress: order.storePickupAddress ?? null,
       externalDeliveryId: order.externalDeliveryId ?? null,
       deliveryTracking: hasTracking
         ? {

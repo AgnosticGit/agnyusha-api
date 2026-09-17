@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { testStorePickupAt } from './helpers/pickup-slot';
 import request from 'supertest';
 import { OrderStatus, StaffPermission, UserRole } from '@prisma/client';
 import { PrismaService } from '../src/prisma/prisma.service';

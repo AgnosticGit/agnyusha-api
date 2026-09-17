@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { testStorePickupAt } from './helpers/pickup-slot';
 import request from 'supertest';
 import { PromoType, UserRole } from '@prisma/client';
 import { createTestApp } from './helpers/cdek-test.helpers';
@@ -175,6 +176,7 @@ describe('Promos + Articles (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         promoCode: code,
         items: [
           {
@@ -187,6 +189,7 @@ describe('Promos + Articles (e2e)', () => {
             qty,
           },
         ],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -269,6 +272,7 @@ describe('Promos + Articles (e2e)', () => {
           cityLabel: 'Санкт-Петербург',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           promoCode: code,
           items: [
             {
@@ -281,7 +285,8 @@ describe('Promos + Articles (e2e)', () => {
               qty: 1,
             },
           ],
-        });
+        privacyConsent: true,
+      });
     }
 
     const [a, b] = await Promise.all([
