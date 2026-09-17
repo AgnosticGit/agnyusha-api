@@ -2,8 +2,9 @@
 
 Deploy path: `/opt/agnyusha`.
 
-Non-secret config (API URLs, warehouse IDs, `PUBLIC_WEB_URL`, etc.) lives in `deploy/.env.example` / server `.env`.  
-GitHub Actions upserts **secrets** and selected **variables** (e.g. `MAIL_FROM`).
+- **Non-secrets** (domain, URLs, `MAIL_FROM`, provider IDs, …) live in `deploy/.env.example` and are applied to server `.env` on each API deploy.
+- **Secrets** come only from GitHub Actions repository secrets.
+- Compose still hardcodes `NODE_ENV`, `PORT`, and image pull names.
 
 ## Auto-deploy (push to `main`)
 
@@ -40,11 +41,10 @@ Settings → Actions → General → Workflow permissions → **Read and write**
 | `OZON_PAY_NOTIFICATION_SECRET` |
 | `OZON_DELIVERY_CLIENT_ID` |
 | `OZON_DELIVERY_CLIENT_SECRET` |
+| `SENTRY_DSN` |
 
-### Repository variables — `agnyusha-api` only
+No repository **Variables** required.
 
-| Name | Value |
-|------|--------|
-| `MAIL_FROM` | `Agnyusha <noreply@agnyusha.ru>` |
-
-Domain is `agnyusha.ru`: `.env` uses `DOMAIN` + `https://` URLs, `Caddyfile` issues Let's Encrypt certs, web image build-arg `NEXT_PUBLIC_SITE_URL=https://agnyusha.ru`. Also add the Google OAuth redirect URI `https://agnyusha.ru/api/auth/google/callback`.
+Change domain / `MAIL_FROM` / tariffs in `deploy/.env.example`, push to `main`.  
+Web build uses hardcoded `NEXT_PUBLIC_SITE_URL=https://agnyusha.ru` in its workflow.  
+Also add Google OAuth redirect URI `https://agnyusha.ru/api/auth/google/callback`.

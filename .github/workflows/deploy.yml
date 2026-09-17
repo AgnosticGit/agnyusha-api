@@ -64,7 +64,6 @@ jobs:
       - name: Pull and restart stack
         uses: appleboy/ssh-action@v1.2.0
         env:
-          MAIL_FROM: ${{ vars.MAIL_FROM }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           CDEK_CLIENT_ID: ${{ secrets.CDEK_CLIENT_ID }}
@@ -85,7 +84,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
           command_timeout: 20m
-          envs: MAIL_FROM,GOOGLE_CLIENT_SECRET,RESEND_API_KEY,CDEK_CLIENT_ID,CDEK_CLIENT_SECRET,YANDEX_DELIVERY_TOKEN,POCHTA_ACCESS_TOKEN,POCHTA_AUTHORIZATION_KEY,OZON_PAY_ACCESS_KEY,OZON_PAY_NOTIFICATION_SECRET,OZON_DELIVERY_CLIENT_ID,OZON_DELIVERY_CLIENT_SECRET,POSTGRES_PASSWORD,SENTRY_DSN,GHCR_TOKEN
+          envs: GOOGLE_CLIENT_SECRET,RESEND_API_KEY,CDEK_CLIENT_ID,CDEK_CLIENT_SECRET,YANDEX_DELIVERY_TOKEN,POCHTA_ACCESS_TOKEN,POCHTA_AUTHORIZATION_KEY,OZON_PAY_ACCESS_KEY,OZON_PAY_NOTIFICATION_SECRET,OZON_DELIVERY_CLIENT_ID,OZON_DELIVERY_CLIENT_SECRET,POSTGRES_PASSWORD,SENTRY_DSN,GHCR_TOKEN
           script: |
             set -e
             cd ${{ env.DEPLOY_PATH }}
@@ -97,7 +96,6 @@ jobs:
               echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
             fi
 
-            # Secrets + non-secret vars (e.g. MAIL_FROM) from GitHub; other defaults live in deploy/.env.example.
             upsert_env() {
               key="$1"
               value="$2"
@@ -110,7 +108,39 @@ jobs:
               printf '%s=%s\n' "$key" "$value" >> "$file"
             }
 
-            upsert_env MAIL_FROM "$MAIL_FROM"
+            # Non-secrets from deploy/.env.example (repo). Secrets stay GitHub-only.
+            is_secret_key() {
+              case "$1" in
+                POSTGRES_PASSWORD|GOOGLE_CLIENT_SECRET|RESEND_API_KEY|\
+                CDEK_CLIENT_ID|CDEK_CLIENT_SECRET|YANDEX_DELIVERY_TOKEN|\
+                POCHTA_ACCESS_TOKEN|POCHTA_AUTHORIZATION_KEY|\
+                OZON_PAY_ACCESS_KEY|OZON_PAY_NOTIFICATION_SECRET|\
+                OZON_DELIVERY_CLIENT_ID|OZON_DELIVERY_CLIENT_SECRET|SENTRY_DSN)
+                  return 0 ;;
+                *) return 1 ;;
+              esac
+            }
+
+            if [ -f .env.example ]; then
+              while IFS= read -r line || [ -n "$line" ]; do
+                case "$line" in
+                  ''|\#*) continue ;;
+                esac
+                case "$line" in
+                  *=*) ;;
+                  *) continue ;;
+                esac
+                key="${line%%=*}"
+                value="${line#*=}"
+                is_secret_key "$key" && continue
+                [ -n "$value" ] || continue
+                case "$value" in
+                  CHANGE_ME*) continue ;;
+                esac
+                upsert_env "$key" "$value"
+              done < .env.example
+            fi
+
             upsert_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
             upsert_env RESEND_API_KEY "$RESEND_API_KEY"
             upsert_env CDEK_CLIENT_ID "$CDEK_CLIENT_ID"
