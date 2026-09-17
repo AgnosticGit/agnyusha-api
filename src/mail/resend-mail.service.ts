@@ -20,7 +20,7 @@ export class ResendMailService {
 
     if (this.from && /[^\x00-\x7F]/.test(this.from)) {
       this.logger.warn(
-        'MAIL_FROM contains non-ASCII characters; Resend will reject it. Use ASCII, e.g. Agnyusha <onboarding@resend.dev>',
+        'MAIL_FROM contains non-ASCII characters; Resend will reject it. Use ASCII, e.g. Agnyusha <noreply@agnyusha.ru>',
       );
     }
   }

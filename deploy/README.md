@@ -3,7 +3,7 @@
 Deploy path: `/opt/agnyusha`.
 
 Non-secret config (API URLs, warehouse IDs, `PUBLIC_WEB_URL`, etc.) lives in `deploy/.env.example` / server `.env`.  
-GitHub Actions upserts **secrets only**.
+GitHub Actions upserts **secrets** and selected **variables** (e.g. `MAIL_FROM`).
 
 ## Auto-deploy (push to `main`)
 
@@ -41,6 +41,10 @@ Settings → Actions → General → Workflow permissions → **Read and write**
 | `OZON_DELIVERY_CLIENT_ID` |
 | `OZON_DELIVERY_CLIENT_SECRET` |
 
-No Repository **Variables** required.
+### Repository variables — `agnyusha-api` only
+
+| Name | Value |
+|------|--------|
+| `MAIL_FROM` | `Agnyusha <noreply@agnyusha.ru>` |
 
 Domain is `agnyusha.ru`: `.env` uses `DOMAIN` + `https://` URLs, `Caddyfile` issues Let's Encrypt certs, web image build-arg `NEXT_PUBLIC_SITE_URL=https://agnyusha.ru`. Also add the Google OAuth redirect URI `https://agnyusha.ru/api/auth/google/callback`.
