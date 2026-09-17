@@ -1,7 +1,7 @@
-# Temporary HTTP (IP or domain without TLS).
-# When DNS is ready, replace with Caddyfile.prod contents and set DOMAIN in .env.
+# TLS via Let's Encrypt — DNS A for DOMAIN and www → VPS IP required.
+# Set DOMAIN=agnyusha.ru in .env, then: docker compose up -d caddy
 
-:80 {
+{$DOMAIN}, www.{$DOMAIN} {
 	encode gzip zstd
 
 	handle /api* {

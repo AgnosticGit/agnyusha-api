@@ -43,4 +43,4 @@ Settings → Actions → General → Workflow permissions → **Read and write**
 
 No Repository **Variables** required.
 
-When you get a domain: edit `/opt/agnyusha/.env` (`PUBLIC_*`, `CORS_*`, `GOOGLE_CALLBACK_URL`), switch to `Caddyfile.prod`, and change `NEXT_PUBLIC_SITE_URL` in the web workflow build-arg.
+Domain is `agnyusha.ru`: `.env` uses `DOMAIN` + `https://` URLs, `Caddyfile` issues Let's Encrypt certs, web image build-arg `NEXT_PUBLIC_SITE_URL=https://agnyusha.ru`. Also add the Google OAuth redirect URI `https://agnyusha.ru/api/auth/google/callback`.
