@@ -6,30 +6,8 @@ import {
   createTestApp,
   jsonResponse,
 } from './helpers/cdek-test.helpers';
+import { loginAs } from './helpers/login-as';
 import { PrismaService } from '../src/prisma/prisma.service';
-import {
-  hashToken,
-  createRawToken,
-  SESSION_COOKIE,
-} from '../src/auth/auth.crypto';
-
-async function loginAs(app: INestApplication, email: string, role: UserRole) {
-  const prisma = app.get(PrismaService);
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: { email, role },
-    update: { role },
-  });
-  const raw = createRawToken();
-  await prisma.session.create({
-    data: {
-      userId: user.id,
-      tokenHash: hashToken(raw),
-      expiresAt: new Date(Date.now() + 86400000),
-    },
-  });
-  return { user, cookie: `${SESSION_COOKIE}=${raw}` };
-}
 
 describe('Health (e2e)', () => {
   let app: INestApplication;

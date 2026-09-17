@@ -11,11 +11,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   REVIEW_ELIGIBLE_STATUSES,
+  averageFromAggregate,
   clampRating,
-  computeRatingAggregate,
-  isReviewEligibleStatus,
 } from './review.util';
 import type { CreateReviewDto, UpdateAdminReviewDto } from './dto/review.dto';
+import { formatPublicDisplayName } from '../common/person-name';
 
 @Injectable()
 export class ReviewsService {
@@ -25,19 +25,22 @@ export class ReviewsService {
   ) {}
 
   private async assertReviewsEnabled() {
-    const { reviewsEnabled } = await this.settings.getPublic();
-    if (!reviewsEnabled) {
+    if (!(await this.settings.isReviewsEnabled())) {
       throw new ServiceUnavailableException('Отзывы временно отключены');
     }
   }
 
   private async refreshProductRating(productId: string, tx?: Prisma.TransactionClient) {
     const db = tx ?? this.prisma;
-    const rows = await db.productReview.findMany({
+    const agg = await db.productReview.aggregate({
       where: { productId, isHidden: false },
-      select: { rating: true },
+      _avg: { rating: true },
+      _count: { _all: true },
     });
-    const { average, count } = computeRatingAggregate(rows.map((r) => r.rating));
+    const { average, count } = averageFromAggregate(
+      agg._avg.rating,
+      agg._count._all,
+    );
     await db.product.update({
       where: { id: productId },
       data: { ratingAverage: average, ratingCount: count },
@@ -69,10 +72,7 @@ export class ReviewsService {
       isHidden: r.isHidden,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
-      authorName:
-        [r.user?.firstName, r.user?.lastName].filter(Boolean).join(' ').trim() ||
-        r.user?.email?.split('@')[0] ||
-        'Покупатель',
+      authorName: formatPublicDisplayName(r.user) ?? 'Покупатель',
       product: r.product
         ? { id: r.product.id, name: r.product.name, slug: r.product.slug }
         : undefined,
@@ -88,11 +88,19 @@ export class ReviewsService {
     });
     if (!product) throw new NotFoundException('Товар не найден');
 
-    const { reviewsEnabled } = await this.settings.getPublic();
-    if (!reviewsEnabled) {
+    if (!(await this.settings.isReviewsEnabled())) {
       return {
         productId: product.id,
         average: 0,
+        count: 0,
+        items: [],
+      };
+    }
+
+    if (product.ratingCount <= 0) {
+      return {
+        productId: product.id,
+        average: product.ratingAverage,
         count: 0,
         items: [],
       };
@@ -115,8 +123,7 @@ export class ReviewsService {
   }
 
   async canUserReview(userId: string, productId: string): Promise<boolean> {
-    const { reviewsEnabled } = await this.settings.getPublic();
-    if (!reviewsEnabled) return false;
+    if (!(await this.settings.isReviewsEnabled())) return false;
     const existing = await this.prisma.productReview.findUnique({
       where: { userId_productId: { userId, productId } },
     });
@@ -138,9 +145,14 @@ export class ReviewsService {
   /** Products the user bought and may still review (account UI). */
   async listEligibleForUser(userId: string) {
     await this.assertReviewsEnabled();
+
     const purchased = await this.prisma.orderItem.findMany({
       where: {
         productId: { not: null },
+        product: {
+          isActive: true,
+          reviews: { none: { userId } },
+        },
         order: {
           userId,
           status: { in: [...REVIEW_ELIGIBLE_STATUSES] as OrderStatus[] },
@@ -155,18 +167,12 @@ export class ReviewsService {
             name: true,
             slug: true,
             image: true,
-            isActive: true,
           },
         },
       },
       orderBy: { order: { createdAt: 'desc' } },
     });
 
-    const existing = await this.prisma.productReview.findMany({
-      where: { userId },
-      select: { productId: true },
-    });
-    const reviewed = new Set(existing.map((r) => r.productId));
     const seen = new Set<string>();
     const items: Array<{
       productId: string;
@@ -175,11 +181,9 @@ export class ReviewsService {
       slug: string;
       image: string;
     }> = [];
-
     for (const row of purchased) {
       const productId = row.productId;
-      if (!productId || !row.product?.isActive) continue;
-      if (reviewed.has(productId) || seen.has(productId)) continue;
+      if (!productId || !row.product || seen.has(productId)) continue;
       seen.add(productId);
       items.push({
         productId,

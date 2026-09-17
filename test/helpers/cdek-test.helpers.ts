@@ -14,6 +14,7 @@ import { MAIL_SEND, type MailSend } from '../../src/mail/mail.tokens';
 import { GOOGLE_FETCH, type GoogleFetch } from '../../src/auth/google.tokens';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { DeliveryMethodCode } from '@prisma/client';
+import { createApiRateLimitMiddleware } from '../../src/common/api-rate-limit';
 import { createOriginGuard } from '../../src/common/origin.guard';
 
 export type MockHttpCall = {
@@ -255,7 +256,9 @@ export async function createTestApp(options: {
 
   const moduleFixture: TestingModule = await builder.compile();
   const app = moduleFixture.createNestApplication();
+  app.set('trust proxy', 1);
   app.use(cookieParser());
+  app.use(createApiRateLimitMiddleware());
   app.setGlobalPrefix('api');
   app.use(
     createOriginGuard(

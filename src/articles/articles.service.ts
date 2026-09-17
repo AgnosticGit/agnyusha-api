@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ArticleStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { formatPublicDisplayName } from '../common/person-name';
 import {
   prepareArticleContent,
   slugifyTitle,
@@ -39,16 +40,30 @@ type ArticleRow = {
 export class ArticlesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private authorSelect = {
+    select: { id: true, email: true, firstName: true, lastName: true },
+  } as const;
+
+  /** Card/list fields — omit heavy contentHtml/contentJson bodies. */
+  private listSelect = {
+    id: true,
+    slug: true,
+    title: true,
+    excerpt: true,
+    coverImage: true,
+    toc: true,
+    status: true,
+    publishedAt: true,
+    authorId: true,
+    createdAt: true,
+    updatedAt: true,
+    author: this.authorSelect,
+  } as const;
+
   private map(row: ArticleRow, opts?: { includeContent?: boolean }) {
     const includeContent = opts?.includeContent !== false;
     const toc = Array.isArray(row.toc) ? (row.toc as ArticleTocItem[]) : [];
-    const authorName =
-      [row.author?.firstName, row.author?.lastName]
-        .filter(Boolean)
-        .join(' ')
-        .trim() ||
-      row.author?.email?.split('@')[0] ||
-      undefined;
+    const authorName = formatPublicDisplayName(row.author) ?? undefined;
 
     return {
       id: row.id,
@@ -73,17 +88,19 @@ export class ArticlesService {
   }
 
   private async uniqueSlug(base: string, excludeId?: string): Promise<string> {
-    let slug = base || `article-${Date.now()}`;
-    let n = 2;
-    for (;;) {
-      const existing = await this.prisma.article.findUnique({
-        where: { slug },
-        select: { id: true },
-      });
-      if (!existing || existing.id === excludeId) return slug;
-      slug = `${base}-${n}`;
-      n += 1;
+    const root = base || `article-${Date.now()}`;
+    const candidates = [root, ...Array.from({ length: 20 }, (_, i) => `${root}-${i + 2}`)];
+    const taken = await this.prisma.article.findMany({
+      where: { slug: { in: candidates } },
+      select: { id: true, slug: true },
+    });
+    const blocked = new Set(
+      taken.filter((row) => row.id !== excludeId).map((row) => row.slug),
+    );
+    for (const slug of candidates) {
+      if (!blocked.has(slug)) return slug;
     }
+    return `${root}-${Date.now()}`;
   }
 
   async listPublished(page = 1, limit = 12) {
@@ -94,18 +111,23 @@ export class ArticlesService {
       this.prisma.article.count({ where }),
       this.prisma.article.findMany({
         where,
-        include: {
-          author: {
-            select: { id: true, email: true, firstName: true, lastName: true },
-          },
-        },
+        select: this.listSelect,
         orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
         skip: (current - 1) * take,
         take,
       }),
     ]);
     return {
-      items: rows.map((r) => this.map(r, { includeContent: false })),
+      items: rows.map((r) =>
+        this.map(
+          {
+            ...r,
+            contentHtml: '',
+            contentJson: {},
+          } as ArticleRow,
+          { includeContent: false },
+        ),
+      ),
       page: current,
       limit: take,
       total,
@@ -117,9 +139,7 @@ export class ArticlesService {
     const row = await this.prisma.article.findFirst({
       where: { slug, status: ArticleStatus.PUBLISHED },
       include: {
-        author: {
-          select: { id: true, email: true, firstName: true, lastName: true },
-        },
+        author: this.authorSelect,
       },
     });
     if (!row) throw new NotFoundException('Статья не найдена');
@@ -128,23 +148,26 @@ export class ArticlesService {
 
   async adminList() {
     const rows = await this.prisma.article.findMany({
-      include: {
-        author: {
-          select: { id: true, email: true, firstName: true, lastName: true },
-        },
-      },
+      select: this.listSelect,
       orderBy: { updatedAt: 'desc' },
     });
-    return rows.map((r) => this.map(r, { includeContent: false }));
+    return rows.map((r) =>
+      this.map(
+        {
+          ...r,
+          contentHtml: '',
+          contentJson: {},
+        } as ArticleRow,
+        { includeContent: false },
+      ),
+    );
   }
 
   async adminGet(id: string) {
     const row = await this.prisma.article.findUnique({
       where: { id },
       include: {
-        author: {
-          select: { id: true, email: true, firstName: true, lastName: true },
-        },
+        author: this.authorSelect,
       },
     });
     if (!row) throw new NotFoundException('Статья не найдена');
@@ -180,9 +203,7 @@ export class ArticlesService {
           authorId,
         },
         include: {
-          author: {
-            select: { id: true, email: true, firstName: true, lastName: true },
-          },
+          author: this.authorSelect,
         },
       });
       return this.map(row);
@@ -255,9 +276,7 @@ export class ArticlesService {
           publishedAt,
         },
         include: {
-          author: {
-            select: { id: true, email: true, firstName: true, lastName: true },
-          },
+          author: this.authorSelect,
         },
       });
       return this.map(row);

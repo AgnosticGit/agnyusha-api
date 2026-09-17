@@ -1,13 +1,9 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { OrderStatus, StaffPermission, UserRole } from '@prisma/client';
-import {
-  createRawToken,
-  hashToken,
-  SESSION_COOKIE,
-} from '../src/auth/auth.crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createTestApp } from './helpers/cdek-test.helpers';
+import { loginAs as loginAsHelper } from './helpers/login-as';
 
 async function loginAs(
   app: INestApplication,
@@ -15,30 +11,7 @@ async function loginAs(
   role: UserRole,
   permissions: StaffPermission[] = [],
 ) {
-  const prisma = app.get(PrismaService);
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: { email, role },
-    update: { role },
-  });
-  await prisma.userPermission.deleteMany({ where: { userId: user.id } });
-  if (permissions.length) {
-    await prisma.userPermission.createMany({
-      data: permissions.map((permission) => ({
-        userId: user.id,
-        permission,
-      })),
-    });
-  }
-  const raw = createRawToken();
-  await prisma.session.create({
-    data: {
-      userId: user.id,
-      tokenHash: hashToken(raw),
-      expiresAt: new Date(Date.now() + 86400000),
-    },
-  });
-  return { user, cookie: `${SESSION_COOKIE}=${raw}` };
+  return loginAsHelper(app, email, { role, permissions });
 }
 
 describe('Admin orders CRM (e2e)', () => {

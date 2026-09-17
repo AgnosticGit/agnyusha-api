@@ -2,38 +2,19 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
 import { createTestApp, setSiteInventoryEnabled } from './helpers/cdek-test.helpers';
+import { loginAs } from './helpers/login-as';
+import { createUniqueSkuFactory } from './helpers/unique-sku';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { hashToken, createRawToken } from '../src/auth/auth.crypto';
-import { SESSION_COOKIE } from '../src/auth/auth.crypto';
-
-async function loginAs(
-  app: INestApplication,
-  email: string,
-  role: UserRole = UserRole.USER,
-) {
-  const prisma = app.get(PrismaService);
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: { email, role, emailVerifiedAt: new Date() },
-    update: { role, emailVerifiedAt: new Date() },
-  });
-  const raw = createRawToken();
-  await prisma.session.create({
-    data: {
-      userId: user.id,
-      tokenHash: hashToken(raw),
-      expiresAt: new Date(Date.now() + 86400000),
-    },
-  });
-  return { user, cookie: `${SESSION_COOKIE}=${raw}` };
-}
+import {
+  createRawToken,
+  hashToken,
+  SESSION_COOKIE,
+} from '../src/auth/auth.crypto';
 
 describe('Catalog admin & orders (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  let skuSeq = 0;
-  const uniqueSku = (prefix: string) =>
-    `${prefix}-${Date.now()}-${++skuSeq}`;
+  const uniqueSku = createUniqueSkuFactory('E2E');
 
   beforeAll(async () => {
     const created = await createTestApp({ cdek: 'missing', yandex: 'missing' });
@@ -53,6 +34,31 @@ describe('Catalog admin & orders (e2e)', () => {
       .expect(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThan(0);
+
+    const first = res.body[0] as {
+      id: string;
+      slug: string;
+      name: string;
+      image: string;
+      sections: unknown[];
+      variants: Array<{ id: string; weight: string; price: number; stock: number }>;
+      fromPrice: number;
+    };
+    expect(first.id).toBeTruthy();
+    expect(first.slug).toBeTruthy();
+    expect(first.name).toBeTruthy();
+    expect(first.image).toBeTruthy();
+    expect(first.sections).toEqual([]);
+    expect(first.variants.length).toBeGreaterThan(0);
+    expect(first.variants[0]).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        weight: expect.any(String),
+        price: expect.any(Number),
+        stock: expect.any(Number),
+      }),
+    );
+    expect(first.fromPrice).toBe(first.variants[0].price);
   });
 
   it('returns product by slug with sections', async () => {

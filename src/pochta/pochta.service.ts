@@ -14,6 +14,11 @@ import {
 } from '../delivery/delivery-eta';
 import { PochtaEntityNotFoundError } from './pochta.errors';
 import { pochtaTelAddress } from './pochta-phone.util';
+import {
+  isPochtaMissingEntityResponse,
+  isPochtaShipmentId,
+  isPochtaShipmentLookupPath,
+} from './pochta-shipment.util';
 import { POCHTA_FETCH, type PochtaFetch } from './pochta.tokens';
 
 type PochtaOfficeSchedule = {
@@ -181,7 +186,11 @@ export class PochtaService {
 
     if (!res.ok) {
       const detail = await readErrorBody(res);
-      if (res.status === 404) {
+      if (
+        res.status === 404 ||
+        (isPochtaShipmentLookupPath(path) &&
+          isPochtaMissingEntityResponse(res.status, detail))
+      ) {
         throw new PochtaEntityNotFoundError(path);
       }
       this.logger.warn(
@@ -657,6 +666,11 @@ export class PochtaService {
       throw new ServiceUnavailableException(
         'Служба доставки временно недоступна',
       );
+    }
+    // Junk ids (e2e leftovers like "gone-1") make Otpravka return 400 forever —
+    // treat as gone before hitting the API so the poller can archive.
+    if (!isPochtaShipmentId(id)) {
+      throw new PochtaEntityNotFoundError(id);
     }
 
     let info: PochtaOrderInfo | null = null;

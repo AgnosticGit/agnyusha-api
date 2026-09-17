@@ -121,32 +121,49 @@ export class OrdersService {
   /** Resolve cart lines from DB — never trust client price/name/image. */
   private async resolveItems(
     items: CreateOrderDto['items'],
+    inventoryEnabled?: boolean,
   ): Promise<ResolvedLine[]> {
-    const resolved: ResolvedLine[] = [];
-    const inventoryEnabled = await this.settings.isInventoryEnabled();
-
-    for (const item of items) {
-      if (!item.variantId?.trim()) {
+    const inventoryOn =
+      inventoryEnabled ?? (await this.settings.isInventoryEnabled());
+    const variantIds = items.map((item) => {
+      const id = item.variantId?.trim();
+      if (!id) {
         throw new BadRequestException('Укажите вариант товара (variantId)');
       }
+      return id;
+    });
 
-      const variant = await this.prisma.productVariant.findUnique({
-        where: { id: item.variantId.trim() },
-        include: { product: true },
-      });
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: [...new Set(variantIds)] } },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            isActive: true,
+          },
+        },
+      },
+    });
+    const byId = new Map(variants.map((v) => [v.id, v]));
+
+    return items.map((item) => {
+      const variantId = item.variantId!.trim();
+      const variant = byId.get(variantId);
 
       if (!variant || !variant.product.isActive) {
         throw new BadRequestException(
           'Товар недоступен для заказа — обновите корзину',
         );
       }
-      if (inventoryEnabled && variant.stock < item.qty) {
+      if (inventoryOn && variant.stock < item.qty) {
         throw new BadRequestException(
           `В наличии только ${variant.stock} шт. — ${variant.product.name} (${variant.weight})`,
         );
       }
 
-      resolved.push({
+      return {
         productId: variant.productId,
         variantId: variant.id,
         sku: variant.sku,
@@ -159,10 +176,8 @@ export class OrdersService {
         heightCm: variant.heightCm,
         price: variant.price,
         qty: item.qty,
-      });
-    }
-
-    return resolved;
+      };
+    });
   }
 
   async create(
@@ -185,7 +200,10 @@ export class OrdersService {
     }
 
     const sessionUser = sessionUserId
-      ? await this.prisma.user.findUnique({ where: { id: sessionUserId } })
+      ? await this.prisma.user.findUnique({
+          where: { id: sessionUserId },
+          select: { id: true, email: true, emailVerifiedAt: true },
+        })
       : null;
     if (sessionUserId && !sessionUser) {
       throw new BadRequestException('Сессия недействительна — войдите снова');
@@ -239,7 +257,8 @@ export class OrdersService {
     }
 
     const userId = owner.id;
-    const resolvedItems = await this.resolveItems(dto.items);
+    const inventoryEnabled = await this.settings.isInventoryEnabled();
+    const resolvedItems = await this.resolveItems(dto.items, inventoryEnabled);
     const merchandiseTotal = resolvedItems.reduce(
       (s, i) => s + i.price * i.qty,
       0,
@@ -300,7 +319,6 @@ export class OrdersService {
       }
     }
 
-    const inventoryEnabled = await this.settings.isInventoryEnabled();
     const order = await this.prisma.$transaction(async (tx) => {
       if (promoApplied?.promoCodeId) {
         await this.promos.incrementRedemption(promoApplied.promoCodeId, tx);
@@ -315,7 +333,9 @@ export class OrdersService {
           if (updated.count !== 1) {
             const fresh = await tx.productVariant.findUnique({
               where: { id: item.variantId },
-              include: { product: true },
+              include: {
+                product: { select: { name: true } },
+              },
             });
             throw new BadRequestException(
               `В наличии только ${fresh?.stock ?? 0} шт. — ${fresh?.product.name ?? 'товар'} (${fresh?.weight ?? ''})`,
@@ -615,13 +635,9 @@ export class OrdersService {
       this.prisma.order.count({ where }),
     ]);
 
-    const items: Array<ReturnType<OrdersService['map']>> = [];
-    for (const order of orders) {
-      items.push(this.map(await this.syncDeliveryTracking(order)));
-    }
-
+    // List stays DB-only — carrier sync runs on get/reconcile + delivery poller.
     return {
-      items,
+      items: orders.map((order) => this.map(order)),
       total,
       page,
       limit,
@@ -773,12 +789,9 @@ export class OrdersService {
       counts[row.status] = all ?? 0;
     }
 
-    const synced = await Promise.all(
-      orders.map((order) => this.syncDeliveryTracking(order)),
-    );
-
+    // Admin list uses stored tracking; detail/get + poller refresh carriers.
     return {
-      items: synced.map((o) => this.mapAdmin(o)),
+      items: orders.map((o) => this.mapAdmin(o)),
       total,
       page,
       limit,
@@ -943,18 +956,25 @@ export class OrdersService {
     items: Array<{ variantId: string | null; qty: number }>,
   ) {
     if (!(await this.settings.isInventoryEnabled())) return;
+    const byVariant = new Map<string, number>();
     for (const item of items) {
-      if (!item.variantId) continue;
+      if (!item.variantId || item.qty <= 0) continue;
+      byVariant.set(
+        item.variantId,
+        (byVariant.get(item.variantId) ?? 0) + item.qty,
+      );
+    }
+    for (const [variantId, qty] of byVariant) {
       await tx.productVariant.update({
-        where: { id: item.variantId },
-        data: { stock: { increment: item.qty } },
+        where: { id: variantId },
+        data: { stock: { increment: qty } },
       });
     }
   }
 
   /**
-   * Poll CDEK/Yandex for tracking when TTL expired.
-   * Safe on every list/get — skips when fresh or terminal.
+   * Poll CDEK/Yandex/Pochta for tracking when TTL expired.
+   * Used on order detail / reconcile / background poller — not on list endpoints.
    */
   async syncDeliveryTracking<
     T extends {

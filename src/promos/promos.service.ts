@@ -18,6 +18,14 @@ import type { UpsertPromoDto, ValidatePromoDto } from './dto/promo.dto';
 export class PromosService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private readonly withProductsInclude = {
+    products: {
+      include: {
+        product: { select: { id: true, name: true, slug: true } },
+      },
+    },
+  } as const;
+
   private map(
     row: {
       id: string;
@@ -59,9 +67,7 @@ export class PromosService {
 
   async list() {
     const rows = await this.prisma.promoCode.findMany({
-      include: {
-        products: { include: { product: { select: { id: true, name: true, slug: true } } } },
-      },
+      include: this.withProductsInclude,
       orderBy: { createdAt: 'desc' },
     });
     return rows.map((r) => this.map(r));
@@ -70,9 +76,7 @@ export class PromosService {
   async get(id: string) {
     const row = await this.prisma.promoCode.findUnique({
       where: { id },
-      include: {
-        products: { include: { product: { select: { id: true, name: true, slug: true } } } },
-      },
+      include: this.withProductsInclude,
     });
     if (!row) throw new NotFoundException('Промокод не найден');
     return this.map(row);
@@ -111,9 +115,7 @@ export class PromosService {
             ? { create: productIds.map((productId) => ({ productId })) }
             : undefined,
         },
-        include: {
-          products: { include: { product: { select: { id: true, name: true, slug: true } } } },
-        },
+        include: this.withProductsInclude,
       });
       return this.map(row);
     } catch (e) {
@@ -125,7 +127,11 @@ export class PromosService {
   }
 
   async update(id: string, dto: UpsertPromoDto) {
-    await this.get(id);
+    const exists = await this.prisma.promoCode.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundException('Промокод не найден');
     const code = normalizePromoCode(dto.code);
     this.assertValue(dto.type, dto.value);
     const appliesToAll = dto.appliesToAllProducts !== false;
@@ -151,16 +157,18 @@ export class PromosService {
             ? { create: productIds.map((productId) => ({ productId })) }
             : undefined,
         },
-        include: {
-          products: { include: { product: { select: { id: true, name: true, slug: true } } } },
-        },
+        include: this.withProductsInclude,
       });
     });
     return this.map(row);
   }
 
   async remove(id: string) {
-    await this.get(id);
+    const exists = await this.prisma.promoCode.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundException('Промокод не найден');
     await this.prisma.promoCode.delete({ where: { id } });
     return { ok: true as const };
   }
@@ -185,31 +193,13 @@ export class PromosService {
   }
 
   async validatePublic(dto: ValidatePromoDto) {
-    const code = normalizePromoCode(dto.code);
-    const row = await this.prisma.promoCode.findUnique({
-      where: { code },
-      include: { products: true },
-    });
-    if (!row) throw new NotFoundException('Промокод не найден');
-    this.assertUsable(row);
-
+    const row = await this.loadUsablePromoByCode(dto.code);
     const lines: PromoLineInput[] = dto.items.map((i) => ({
       productId: i.productId,
       price: i.price,
       qty: i.qty,
     }));
-    const calc = computePromoDiscount(
-      {
-        type: row.type,
-        value: row.value,
-        appliesToAllProducts: row.appliesToAllProducts,
-        productIds: row.products.map((p) => p.productId),
-      },
-      lines,
-    );
-    if (calc.discountAmount <= 0) {
-      throw new BadRequestException('Промокод не применяется к этим товарам');
-    }
+    const calc = this.computeForLines(row, lines);
     return {
       code: row.code,
       type: row.type,
@@ -222,13 +212,47 @@ export class PromosService {
   /** Server-side resolve for order create — uses DB prices from lines. */
   async resolveForOrder(codeRaw: string | undefined | null, lines: PromoLineInput[]) {
     if (!codeRaw?.trim()) return null;
+    const row = await this.loadUsablePromoByCode(codeRaw, {
+      notFoundAsBadRequest: true,
+    });
+    const calc = this.computeForLines(row, lines);
+    return {
+      promoCodeId: row.id,
+      promoCode: row.code,
+      discountAmount: calc.discountAmount,
+      subtotal: calc.subtotal,
+      total: Math.round((calc.subtotal - calc.discountAmount) * 100) / 100,
+    };
+  }
+
+  private async loadUsablePromoByCode(
+    codeRaw: string,
+    opts: { notFoundAsBadRequest?: boolean } = {},
+  ) {
     const code = normalizePromoCode(codeRaw);
     const row = await this.prisma.promoCode.findUnique({
       where: { code },
       include: { products: true },
     });
-    if (!row) throw new BadRequestException('Промокод не найден');
+    if (!row) {
+      if (opts.notFoundAsBadRequest) {
+        throw new BadRequestException('Промокод не найден');
+      }
+      throw new NotFoundException('Промокод не найден');
+    }
     this.assertUsable(row);
+    return row;
+  }
+
+  private computeForLines(
+    row: {
+      type: PromoType;
+      value: number;
+      appliesToAllProducts: boolean;
+      products: Array<{ productId: string }>;
+    },
+    lines: PromoLineInput[],
+  ) {
     const calc = computePromoDiscount(
       {
         type: row.type,
@@ -241,13 +265,7 @@ export class PromosService {
     if (calc.discountAmount <= 0) {
       throw new BadRequestException('Промокод не применяется к этим товарам');
     }
-    return {
-      promoCodeId: row.id,
-      promoCode: row.code,
-      discountAmount: calc.discountAmount,
-      subtotal: calc.subtotal,
-      total: Math.round((calc.subtotal - calc.discountAmount) * 100) / 100,
-    };
+    return calc;
   }
 
   async incrementRedemption(promoCodeId: string, tx: Prisma.TransactionClient) {

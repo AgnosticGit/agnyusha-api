@@ -57,7 +57,7 @@ describe('Delivery tracking poll (e2e)', () => {
     });
   }
 
-  it('creates CDEK shipment and syncs tracking on list', async () => {
+  it('creates CDEK shipment and syncs tracking on order detail', async () => {
     let getOrderCalls = 0;
     const mock = createMockCdekFetch(async (input, init) => {
       const url = String(input);
@@ -138,22 +138,19 @@ describe('Delivery tracking poll (e2e)', () => {
         }),
       );
 
-      const listed = await request(app.getHttpServer())
-        .get('/api/orders')
+      const detail = await request(app.getHttpServer())
+        .get(`/api/orders/${created.body.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
 
-      const order = listed.body.items.find(
-        (o: { id: string }) => o.id === created.body.id,
-      );
-      expect(order.deliveryTracking.statusCode).toBe('ACCEPTED');
-      expect(order.deliveryTracking.statusLabel).toBe('Принят');
+      expect(detail.body.deliveryTracking.statusCode).toBe('ACCEPTED');
+      expect(detail.body.deliveryTracking.statusLabel).toBe('Принят');
       // Booking in CDEK ≠ physical handover — do not bump site status yet.
-      expect(order.status).not.toBe('CONFIRMED');
+      expect(detail.body.status).not.toBe('CONFIRMED');
       expect(getOrderCalls).toBe(1);
 
       await request(app.getHttpServer())
-        .get('/api/orders')
+        .get(`/api/orders/${created.body.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
       expect(getOrderCalls).toBe(1);
@@ -168,7 +165,7 @@ describe('Delivery tracking poll (e2e)', () => {
     }
   });
 
-  it('syncs Yandex request/info on list and respects TTL', async () => {
+  it('syncs Yandex request/info on order detail and respects TTL', async () => {
     let infoCalls = 0;
     const mock = createMockYandexFetch(async (input, init) => {
       const url = String(input);
@@ -232,15 +229,12 @@ describe('Delivery tracking poll (e2e)', () => {
         },
       });
 
-      const listed = await request(app.getHttpServer())
-        .get('/api/orders')
+      const detail = await request(app.getHttpServer())
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
 
-      const row = listed.body.items.find(
-        (o: { id: string }) => o.id === order.id,
-      );
-      expect(row.deliveryTracking).toEqual(
+      expect(detail.body.deliveryTracking).toEqual(
         expect.objectContaining({
           statusCode: 'DELIVERY_AT_START',
           statusLabel: 'На складе',
@@ -248,11 +242,11 @@ describe('Delivery tracking poll (e2e)', () => {
           trackNumber: 'ya-req-track-1',
         }),
       );
-      expect(row.status).toBe('SHIPPED');
+      expect(detail.body.status).toBe('SHIPPED');
       expect(infoCalls).toBe(1);
 
       await request(app.getHttpServer())
-        .get('/api/orders')
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
       expect(infoCalls).toBe(1);
@@ -552,21 +546,18 @@ describe('Delivery tracking poll (e2e)', () => {
         },
       });
 
-      const listed = await request(app.getHttpServer())
-        .get('/api/orders')
+      const detail = await request(app.getHttpServer())
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
 
-      const row = listed.body.items.find(
-        (o: { id: string }) => o.id === order.id,
-      );
-      expect(row.status).toBe('ARCHIVED');
-      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
-      expect(row.deliveryTracking.statusLabel).toContain('СДЭК');
+      expect(detail.body.status).toBe('ARCHIVED');
+      expect(detail.body.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(detail.body.deliveryTracking.statusLabel).toContain('СДЭК');
       expect(getOrderCalls).toBe(1);
 
       await request(app.getHttpServer())
-        .get('/api/orders')
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
       expect(getOrderCalls).toBe(1);
@@ -604,15 +595,12 @@ describe('Delivery tracking poll (e2e)', () => {
         },
       });
 
-      const listed2 = await request(app.getHttpServer())
-        .get('/api/orders')
+      const doneDetail = await request(app.getHttpServer())
+        .get(`/api/orders/${keptDone.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
-      const doneRow = listed2.body.items.find(
-        (o: { id: string }) => o.id === keptDone.id,
-      );
-      expect(doneRow.status).toBe('DONE');
-      expect(doneRow.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(doneDetail.body.status).toBe('DONE');
+      expect(doneDetail.body.deliveryTracking.statusCode).toBe('REMOVED');
       expect(getOrderCalls).toBe(2);
 
       await prisma.order.delete({ where: { id: order.id } });
@@ -698,20 +686,17 @@ describe('Delivery tracking poll (e2e)', () => {
         },
       });
 
-      const listed = await request(app.getHttpServer())
-        .get('/api/orders')
+      const detail = await request(app.getHttpServer())
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
 
-      const row = listed.body.items.find(
-        (o: { id: string }) => o.id === order.id,
-      );
-      expect(row.status).toBe('ARCHIVED');
-      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
-      expect(row.deliveryTracking.statusLabel).toContain('СДЭК');
+      expect(detail.body.status).toBe('ARCHIVED');
+      expect(detail.body.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(detail.body.deliveryTracking.statusLabel).toContain('СДЭК');
       expect(getOrderCalls).toBe(1);
 
-      // Already-INVALID rows heal on next list without another CDEK call.
+      // Already-INVALID rows heal on next detail fetch without another CDEK call.
       await prisma.order.update({
         where: { id: order.id },
         data: {
@@ -722,14 +707,11 @@ describe('Delivery tracking poll (e2e)', () => {
         },
       });
       const healed = await request(app.getHttpServer())
-        .get('/api/orders')
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
-      const healedRow = healed.body.items.find(
-        (o: { id: string }) => o.id === order.id,
-      );
-      expect(healedRow.status).toBe('ARCHIVED');
-      expect(healedRow.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(healed.body.status).toBe('ARCHIVED');
+      expect(healed.body.deliveryTracking.statusCode).toBe('REMOVED');
       expect(getOrderCalls).toBe(1);
 
       await prisma.order.delete({ where: { id: order.id } });
@@ -806,21 +788,18 @@ describe('Delivery tracking poll (e2e)', () => {
         },
       });
 
-      const listed = await request(app.getHttpServer())
-        .get('/api/orders')
+      const detail = await request(app.getHttpServer())
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
 
-      const row = listed.body.items.find(
-        (o: { id: string }) => o.id === order.id,
-      );
-      expect(row.status).toBe('ARCHIVED');
-      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
-      expect(row.deliveryTracking.statusLabel).toContain('Яндекс');
+      expect(detail.body.status).toBe('ARCHIVED');
+      expect(detail.body.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(detail.body.deliveryTracking.statusLabel).toContain('Яндекс');
       expect(infoCalls).toBe(1);
 
       await request(app.getHttpServer())
-        .get('/api/orders')
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
       expect(infoCalls).toBe(1);
@@ -857,15 +836,12 @@ describe('Delivery tracking poll (e2e)', () => {
         },
       });
 
-      const listed2 = await request(app.getHttpServer())
-        .get('/api/orders')
+      const doneDetail = await request(app.getHttpServer())
+        .get(`/api/orders/${keptDone.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
-      const doneRow = listed2.body.items.find(
-        (o: { id: string }) => o.id === keptDone.id,
-      );
-      expect(doneRow.status).toBe('DONE');
-      expect(doneRow.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(doneDetail.body.status).toBe('DONE');
+      expect(doneDetail.body.deliveryTracking.statusCode).toBe('REMOVED');
       expect(infoCalls).toBe(2);
 
       await prisma.order.delete({ where: { id: order.id } });
@@ -946,17 +922,14 @@ describe('Delivery tracking poll (e2e)', () => {
         },
       });
 
-      const listed = await request(app.getHttpServer())
-        .get('/api/orders')
+      const detail = await request(app.getHttpServer())
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
 
-      const row = listed.body.items.find(
-        (o: { id: string }) => o.id === order.id,
-      );
-      expect(row.status).toBe('ARCHIVED');
-      expect(row.deliveryTracking.statusCode).toBe('REMOVED');
-      expect(row.deliveryTracking.statusLabel).toContain('Яндекс');
+      expect(detail.body.status).toBe('ARCHIVED');
+      expect(detail.body.deliveryTracking.statusCode).toBe('REMOVED');
+      expect(detail.body.deliveryTracking.statusLabel).toContain('Яндекс');
       expect(infoCalls).toBe(1);
 
       await prisma.order.delete({ where: { id: order.id } });

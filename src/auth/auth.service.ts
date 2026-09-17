@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { UserRole } from '@prisma/client';
 import { resolvePublicWebUrl } from '../common/web-origin';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAIL_SEND, type MailSend } from '../mail/mail.tokens';
@@ -132,7 +133,12 @@ export class AuthService {
     }
   }
 
-  private async permissionsForUser(userId: string) {
+  private async permissionsForUser(
+    userId: string,
+    role: AuthUser['role'],
+  ) {
+    // USER/ADMIN never store staff ACL rows — skip the round-trip.
+    if (role === UserRole.USER || role === UserRole.ADMIN) return [];
     const rows = await this.prisma.userPermission.findMany({
       where: { userId },
       select: { permission: true },
@@ -157,7 +163,7 @@ export class AuthService {
       lastName: user.lastName ?? '',
       firstName: user.firstName ?? '',
       role: user.role,
-      permissions: await this.permissionsForUser(user.id),
+      permissions: await this.permissionsForUser(user.id, user.role),
     };
   }
 
@@ -167,6 +173,10 @@ export class AuthService {
       email: string;
       role: AuthUser['role'];
       bannedAt?: Date | null;
+      emailVerifiedAt?: Date | null;
+      phone?: string | null;
+      lastName?: string | null;
+      firstName?: string | null;
     },
     opts: { verifyEmail?: boolean } = {},
   ): Promise<{
@@ -202,9 +212,13 @@ export class AuthService {
 
     return {
       sessionToken,
-      user: await this.toAuthUser(
-        await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } }),
-      ),
+      user: await this.toAuthUser({
+        ...user,
+        emailVerifiedAt:
+          verifyEmail && !user.emailVerifiedAt
+            ? now
+            : (user.emailVerifiedAt ?? null),
+      }),
       maxAgeMs,
     };
   }

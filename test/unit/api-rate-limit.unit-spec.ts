@@ -98,6 +98,69 @@ describe('createApiRateLimitMiddleware', () => {
     expect(blocked.status).toBe(429);
   });
 
+  it('returns 429 when cities search bucket is exhausted', () => {
+    const buckets = {
+      global: new SlidingWindowRateLimiter(100, 60_000),
+      citiesSearch: new SlidingWindowRateLimiter(1, 60_000),
+      ordersWrite: new SlidingWindowRateLimiter(10, 60_000),
+    };
+    const mw = createApiRateLimitMiddleware(buckets);
+    expect(run(mw, '/api/cities/search').nextCalled).toBe(true);
+    const blocked = run(mw, '/api/cities/search');
+    expect(blocked.nextCalled).toBe(false);
+    expect(blocked.status).toBe(429);
+  });
+
+  it('returns 429 when orders write bucket is exhausted', () => {
+    const buckets = {
+      global: new SlidingWindowRateLimiter(100, 60_000),
+      citiesSearch: new SlidingWindowRateLimiter(30, 60_000),
+      ordersWrite: new SlidingWindowRateLimiter(1, 60_000),
+    };
+    const mw = createApiRateLimitMiddleware(buckets);
+    expect(run(mw, '/api/orders', 'POST').nextCalled).toBe(true);
+    const blocked = run(mw, '/api/orders', 'POST');
+    expect(blocked.nextCalled).toBe(false);
+    expect(blocked.status).toBe(429);
+  });
+
+  it('rate-limits by first X-Forwarded-For hop', () => {
+    const buckets = {
+      global: new SlidingWindowRateLimiter(1, 60_000),
+      citiesSearch: new SlidingWindowRateLimiter(30, 60_000),
+      ordersWrite: new SlidingWindowRateLimiter(10, 60_000),
+    };
+    const mw = createApiRateLimitMiddleware(buckets);
+    const runXff = (forwarded: string) => {
+      let status = 0;
+      const req = {
+        path: '/api/products',
+        method: 'GET',
+        originalUrl: '/api/products?x=1',
+        headers: { 'x-forwarded-for': forwarded },
+        ip: '9.9.9.9',
+        socket: { remoteAddress: '9.9.9.9' },
+      } as Request;
+      const res = {
+        status(code: number) {
+          status = code;
+          return this;
+        },
+        json() {
+          return this;
+        },
+      } as Response;
+      let nextCalled = false;
+      mw(req, res, () => {
+        nextCalled = true;
+      });
+      return { status, nextCalled };
+    };
+    expect(runXff('10.0.0.1, 10.0.0.2').nextCalled).toBe(true);
+    expect(runXff('10.0.0.1, 10.0.0.9').nextCalled).toBe(false);
+    expect(runXff('10.0.0.3, 10.0.0.1').nextCalled).toBe(true);
+  });
+
   it('skips non-api paths', () => {
     const buckets = createApiRateLimitBuckets();
     const mw = createApiRateLimitMiddleware(buckets);

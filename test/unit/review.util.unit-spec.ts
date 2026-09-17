@@ -1,6 +1,7 @@
 import {
   clampRating,
   computeRatingAggregate,
+  averageFromAggregate,
   isReviewEligibleStatus,
 } from '../../src/reviews/review.util';
 
@@ -18,6 +19,11 @@ describe('review.util', () => {
       count: 3,
     });
     expect(computeRatingAggregate([])).toEqual({ average: 0, count: 0 });
+  });
+
+  it('rounds Prisma aggregate avg/count', () => {
+    expect(averageFromAggregate(4.666, 3)).toEqual({ average: 4.7, count: 3 });
+    expect(averageFromAggregate(null, 0)).toEqual({ average: 0, count: 0 });
   });
 
   it('eligible statuses', () => {

@@ -13,6 +13,9 @@ export class SlidingWindowRateLimiter {
     const recent = (this.hits.get(key) ?? []).filter(
       (t) => now - t < this.windowMs,
     );
+    if (recent.length === 0) {
+      this.hits.delete(key);
+    }
     if (recent.length >= this.limit) {
       this.hits.set(key, recent);
       return false;

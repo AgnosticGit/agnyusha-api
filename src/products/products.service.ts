@@ -93,12 +93,56 @@ export class ProductsService {
   }
 
   async listPublic() {
+    // Catalog cards: name, image, badge, variants (stock/price) — skip galleries & nutrition.
     const items = await this.prisma.product.findMany({
       where: { isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-      include: this.includeVariants,
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        subtitle: true,
+        image: true,
+        category: true,
+        badge: true,
+        badgeLabel: true,
+        badgeColor: true,
+        discountPercent: true,
+        ratingAverage: true,
+        ratingCount: true,
+        sortOrder: true,
+        isActive: true,
+        isPopular: true,
+        createdAt: true,
+        updatedAt: true,
+        variants: {
+          orderBy: { sortOrder: 'asc' as const },
+          select: {
+            id: true,
+            productId: true,
+            sku: true,
+            weight: true,
+            weightGrams: true,
+            lengthCm: true,
+            widthCm: true,
+            heightCm: true,
+            price: true,
+            stock: true,
+            sortOrder: true,
+          },
+        },
+      },
     });
-    return items.map((p) => this.map(p));
+    return items.map((p) =>
+      this.map({
+        ...p,
+        images: [],
+        sections: [],
+        nutritionProtein: null,
+        nutritionFat: null,
+        nutritionCarbs: null,
+      } as ProductWithVariants),
+    );
   }
 
   async listAdmin() {
@@ -219,16 +263,22 @@ export class ProductsService {
   }
 
   private async uniqueSlug(base: string, excludeId?: string) {
-    const slug = slugify(base);
-    let i = 0;
-    while (true) {
-      const candidate = i === 0 ? slug : `${slug}-${i}`;
-      const existing = await this.prisma.product.findUnique({
-        where: { slug: candidate },
-      });
-      if (!existing || existing.id === excludeId) return candidate;
-      i += 1;
+    const root = slugify(base);
+    const candidates = [
+      root,
+      ...Array.from({ length: 20 }, (_, i) => `${root}-${i + 1}`),
+    ];
+    const taken = await this.prisma.product.findMany({
+      where: { slug: { in: candidates } },
+      select: { id: true, slug: true },
+    });
+    const blocked = new Set(
+      taken.filter((row) => row.id !== excludeId).map((row) => row.slug),
+    );
+    for (const candidate of candidates) {
+      if (!blocked.has(candidate)) return candidate;
     }
+    return `${root}-${Date.now()}`;
   }
 
   private async assertSkusAvailable(
@@ -236,10 +286,14 @@ export class ProductsService {
     productId?: string,
   ) {
     this.assertUniqueSkus(variants);
+    const skus = variants.map((v) => v.sku);
+    const existingRows = await this.prisma.productVariant.findMany({
+      where: { sku: { in: skus } },
+    });
+    const bySku = new Map(existingRows.map((row) => [row.sku, row]));
+
     for (const v of variants) {
-      const existing = await this.prisma.productVariant.findUnique({
-        where: { sku: v.sku },
-      });
+      const existing = bySku.get(v.sku);
       if (!existing) continue;
       if (v.id && existing.id === v.id) continue;
       if (
@@ -250,8 +304,6 @@ export class ProductsService {
         continue;
       }
       if (productId && existing.productId === productId && !v.id) {
-        // Same product updating sku of another row — conflict if different row keeps old sku
-        // Handled by unique constraint; treat as conflict if sku belongs to sibling being kept
         const kept = variants.find((x) => x.id === existing.id);
         if (kept && kept.sku !== v.sku) continue;
       }

@@ -307,6 +307,10 @@ export class PaymentsService {
     const mark = this.markOrderPaid(id, details.id);
     const deadline = Date.now() + 4_000;
     while (Date.now() < deadline) {
+      const settled = await Promise.race([
+        mark.then(() => 'done' as const),
+        new Promise<'tick'>((r) => setTimeout(() => r('tick'), 100)),
+      ]);
       const row = await this.prisma.order.findUnique({
         where: { id },
         select: { paidAt: true, status: true },
@@ -319,9 +323,9 @@ export class PaymentsService {
           number: order.number,
         };
       }
-      await new Promise((r) => setTimeout(r, 40));
+      if (settled === 'done') break;
     }
-    await mark;
+    await mark.catch(() => undefined);
     const updated = await this.prisma.order.findUnique({ where: { id } });
     return {
       status: updated?.status ?? OrderStatus.PAID,
