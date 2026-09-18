@@ -34,16 +34,33 @@ export class PickupDayScheduleDto {
   endTime!: string;
 }
 
-export class UpdatePickupSettingsDto {
+export class PickupLocationDto {
   @IsString()
-  @MinLength(3, { message: 'Укажите адрес' })
+  @MinLength(2, { message: 'Укажите город' })
+  @MaxLength(120)
+  city!: string;
+
+  @IsString()
+  @MinLength(2, { message: 'Укажите адрес' })
   @MaxLength(200)
   address!: string;
+}
 
+export class UpdatePickupSettingsDto {
   @IsInt()
   @Min(0)
   @Max(30)
   minLeadDays!: number;
+
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(32, { each: true })
+  phones!: string[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PickupLocationDto)
+  locations!: PickupLocationDto[];
 
   @IsArray()
   @ValidateNested({ each: true })

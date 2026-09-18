@@ -283,6 +283,8 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(listed).toBeTruthy();
     expect(listed.items[0].productSlug).toBe(create.body.slug);
     expect(order.body.items[0].productSlug).toBe(create.body.slug);
+    expect(order.body.storePickupAddress).toContain('Гранитная');
+    expect(order.body.storePickupPhones).toEqual(['+7 (911) 228-31-92']);
 
     await request(app.getHttpServer())
       .delete(`/api/admin/products/${create.body.id}`)

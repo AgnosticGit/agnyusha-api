@@ -31,6 +31,7 @@ import { buildPaidOrderStaffNotifyMail } from '../mail/order-paid-staff';
 import { PromosService } from '../promos/promos.service';
 import { SettingsService } from '../settings/settings.service';
 import { PickupService } from '../pickup/pickup.service';
+import { isValidPickupSlot } from '../pickup/pickup.util';
 import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
 import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
 import { YandexEntityNotFoundError } from '../yandex/yandex.errors';
@@ -360,6 +361,7 @@ export class OrdersService {
 
     let storePickupAt: Date | null = null;
     let storePickupAddress: string | null = null;
+    let storePickupPhones: string[] = [];
     if (deliveryCode === DeliveryMethodCode.PICKUP) {
       const raw = dto.storePickupAt?.trim();
       if (!raw) {
@@ -369,9 +371,17 @@ export class OrdersService {
       if (Number.isNaN(parsed.getTime())) {
         throw new BadRequestException('Некорректная дата самовывоза');
       }
-      const settings = await this.pickup.assertValidSlot(parsed);
+      const { settings, location } = await this.pickup.resolveLocationForCity({
+        cityLabel: dto.cityLabel.trim(),
+      });
+      if (!isValidPickupSlot(settings, parsed)) {
+        throw new BadRequestException(
+          'Выберите доступную дату и время самовывоза',
+        );
+      }
       storePickupAt = parsed;
-      storePickupAddress = settings.address;
+      storePickupAddress = this.pickup.displayAddress(location);
+      storePickupPhones = settings.phones;
     }
 
     const order = await this.prisma.$transaction(async (tx) => {
@@ -414,6 +424,7 @@ export class OrdersService {
           pickupCode,
           storePickupAt,
           storePickupAddress,
+          storePickupPhones,
           subtotal,
           discountAmount,
           promoCodeId: promoApplied?.promoCodeId ?? null,
@@ -1399,6 +1410,7 @@ export class OrdersService {
     pickupCode?: string | null;
     storePickupAt?: Date | null;
     storePickupAddress?: string | null;
+    storePickupPhones?: string[];
     externalDeliveryId?: string | null;
     deliveryTrackNumber?: string | null;
     deliveryStatusCode?: string | null;
@@ -1444,6 +1456,7 @@ export class OrdersService {
       pickupCode: order.pickupCode ?? null,
       storePickupAt: order.storePickupAt?.toISOString() ?? null,
       storePickupAddress: order.storePickupAddress ?? null,
+      storePickupPhones: order.storePickupPhones ?? [],
       externalDeliveryId: order.externalDeliveryId ?? null,
       deliveryTracking: hasTracking
         ? {

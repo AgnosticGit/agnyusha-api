@@ -4,10 +4,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { UpdatePickupSettingsDto } from './dto/pickup.dto';
 import {
   DEFAULT_PICKUP_SETTINGS,
+  findPickupLocation,
+  formatPickupLocationAddress,
   generatePickupSlots,
+  isPickupAllowedForLocation,
   isValidPickupSlot,
   normalizePickupSettings,
   scheduleSummary,
+  type PickupLocation,
   type PickupSettingsShape,
 } from './pickup.util';
 
@@ -25,6 +29,8 @@ export class PickupService {
     return normalizePickupSettings({
       address: row.address,
       minLeadDays: row.minLeadDays,
+      phones: row.phones,
+      locations: row.locations,
       schedule: row.schedule,
     });
   }
@@ -36,13 +42,19 @@ export class PickupService {
         id: 'default',
         address: DEFAULT_PICKUP_SETTINGS.address,
         minLeadDays: DEFAULT_PICKUP_SETTINGS.minLeadDays,
-        schedule: DEFAULT_PICKUP_SETTINGS.schedule as unknown as Prisma.InputJsonValue,
+        phones: DEFAULT_PICKUP_SETTINGS.phones,
+        locations:
+          DEFAULT_PICKUP_SETTINGS.locations as unknown as Prisma.InputJsonValue,
+        schedule:
+          DEFAULT_PICKUP_SETTINGS.schedule as unknown as Prisma.InputJsonValue,
       },
       update: {},
     });
     return normalizePickupSettings({
       address: created.address,
       minLeadDays: created.minLeadDays,
+      phones: created.phones,
+      locations: created.locations,
       schedule: created.schedule,
     });
   }
@@ -64,27 +76,45 @@ export class PickupService {
     }
     const weekdays = new Set(dto.schedule.map((d) => d.weekday));
     if (weekdays.size !== 7) {
-      throw new BadRequestException('Каждый день недели должен быть указан один раз');
+      throw new BadRequestException(
+        'Каждый день недели должен быть указан один раз',
+      );
     }
 
     const normalized = normalizePickupSettings(dto);
+    if (!normalized.phones.length) {
+      throw new BadRequestException(
+        'Укажите хотя бы один телефон для самовывоза',
+      );
+    }
+    if (!normalized.locations.length) {
+      throw new BadRequestException(
+        'Укажите хотя бы один город и адрес самовывоза',
+      );
+    }
     const row = await this.prisma.pickupSettings.upsert({
       where: { id: 'default' },
       create: {
         id: 'default',
         address: normalized.address,
         minLeadDays: normalized.minLeadDays,
+        phones: normalized.phones,
+        locations: normalized.locations as unknown as Prisma.InputJsonValue,
         schedule: normalized.schedule as unknown as Prisma.InputJsonValue,
       },
       update: {
         address: normalized.address,
         minLeadDays: normalized.minLeadDays,
+        phones: normalized.phones,
+        locations: normalized.locations as unknown as Prisma.InputJsonValue,
         schedule: normalized.schedule as unknown as Prisma.InputJsonValue,
       },
     });
     return normalizePickupSettings({
       address: row.address,
       minLeadDays: row.minLeadDays,
+      phones: row.phones,
+      locations: row.locations,
       schedule: row.schedule,
     });
   }
@@ -106,5 +136,42 @@ export class PickupService {
       );
     }
     return settings;
+  }
+
+  async resolveLocationForCity(input: {
+    cityLabel: string;
+    region?: string;
+    settlement?: string;
+  }): Promise<{ settings: PickupSettingsShape; location: PickupLocation }> {
+    const settings = await this.getSettings();
+    const location = findPickupLocation(settings.locations, {
+      label: input.cityLabel,
+      region: input.region,
+      settlement: input.settlement,
+    });
+    if (!location) {
+      throw new BadRequestException(
+        'Самовывоз недоступен для выбранного города',
+      );
+    }
+    return { settings, location };
+  }
+
+  displayAddress(location: PickupLocation): string {
+    return formatPickupLocationAddress(location);
+  }
+
+  isAllowedForCity(input: {
+    cityLabel?: string;
+    region?: string;
+    settlement?: string;
+  }): Promise<boolean> {
+    return this.getSettings().then((settings) =>
+      isPickupAllowedForLocation(settings.locations, {
+        label: input.cityLabel,
+        region: input.region,
+        settlement: input.settlement,
+      }),
+    );
   }
 }

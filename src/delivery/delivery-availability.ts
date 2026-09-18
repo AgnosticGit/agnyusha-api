@@ -42,6 +42,8 @@ export function mapDeliveryAvailability(
     yandexMoscowOnly: boolean;
     /** Optional note under Самовывоз (address + hours). */
     pickupNote?: string;
+    /** Whether store pickup is offered for this location. */
+    pickupAllowed?: boolean;
   },
 ): DeliveryAvailability[] {
   const { region, label } = input;
@@ -60,10 +62,13 @@ export function mapDeliveryAvailability(
       };
     }
     if (m.code === 'PICKUP') {
+      const available = Boolean(input.pickupAllowed);
       return {
         ...m,
-        available: true,
-        note: input.pickupNote ?? 'Выберите дату и время самовывоза',
+        available,
+        note: available
+          ? input.pickupNote ?? 'Выберите дату и время самовывоза'
+          : 'Самовывоз недоступен в этом городе',
       };
     }
     if (m.code === 'CDEK') {

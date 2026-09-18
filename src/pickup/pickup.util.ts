@@ -11,17 +11,50 @@ export type PickupDaySchedule = {
   endTime: string;
 };
 
+export type PickupLocation = {
+  /** City name typed by admin (matched against checkout city). */
+  city: string;
+  /** Street / place within the city. */
+  address: string;
+};
+
 export type PickupSettingsShape = {
+  /** Display address of the first location (legacy / fallback). */
   address: string;
   minLeadDays: number;
+  /** Formatted RU phones buyers should call to collect the order. */
+  phones: string[];
+  /** Manual pickup points: city + address. */
+  locations: PickupLocation[];
   schedule: PickupDaySchedule[];
 };
 
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
+export const DEFAULT_PICKUP_PHONES = ['+7 (911) 228-31-92'] as const;
+export const MAX_PICKUP_PHONES = 10;
+export const MAX_PICKUP_LOCATIONS = 30;
+
+export const DEFAULT_PICKUP_LOCATIONS: PickupLocation[] = [
+  { city: 'Санкт-Петербург', address: 'Гранитная 51' },
+];
+
+export function formatPickupLocationAddress(location: PickupLocation): string {
+  const city = location.city.trim();
+  const address = location.address.trim();
+  if (!city) return address;
+  if (!address) return city;
+  const cityKey = normalizeCityKey(city);
+  const addressKey = normalizeCityKey(address);
+  if (addressKey.includes(cityKey)) return address;
+  return `${city}, ${address}`;
+}
+
 export const DEFAULT_PICKUP_SETTINGS: PickupSettingsShape = {
-  address: 'Санкт-Петербург, Гранитная 51',
+  address: formatPickupLocationAddress(DEFAULT_PICKUP_LOCATIONS[0]),
   minLeadDays: 1,
+  phones: [...DEFAULT_PICKUP_PHONES],
+  locations: DEFAULT_PICKUP_LOCATIONS.map((l) => ({ ...l })),
   schedule: [
     { weekday: 0, open: false, startTime: '12:00', endTime: '14:00' },
     { weekday: 1, open: true, startTime: '12:00', endTime: '14:00' },
@@ -32,6 +65,116 @@ export const DEFAULT_PICKUP_SETTINGS: PickupSettingsShape = {
     { weekday: 6, open: true, startTime: '12:00', endTime: '14:00' },
   ],
 };
+
+export function normalizeCityKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/^г\.?\s+/u, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Normalize admin location rows; missing → Spb default. Empty array stays empty. */
+export function normalizePickupLocations(raw: unknown): PickupLocation[] {
+  if (raw === undefined || raw === null) {
+    return DEFAULT_PICKUP_LOCATIONS.map((l) => ({ ...l }));
+  }
+  if (!Array.isArray(raw)) {
+    return DEFAULT_PICKUP_LOCATIONS.map((l) => ({ ...l }));
+  }
+  const seen = new Set<string>();
+  const out: PickupLocation[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const city = typeof row.city === 'string' ? row.city.trim() : '';
+    const address = typeof row.address === 'string' ? row.address.trim() : '';
+    if (!city || !address) continue;
+    const key = normalizeCityKey(city);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ city, address });
+    if (out.length >= MAX_PICKUP_LOCATIONS) break;
+  }
+  return out;
+}
+
+/** Find location whose city name appears in the checkout city text. */
+export function findPickupLocation(
+  locations: PickupLocation[],
+  input: {
+    region?: string;
+    label?: string;
+    settlement?: string;
+  },
+): PickupLocation | null {
+  if (!locations.length) return null;
+  const haystack = normalizeCityKey(
+    [input.label, input.region, input.settlement].filter(Boolean).join(' '),
+  );
+  if (!haystack) return null;
+  return (
+    locations.find((loc) => {
+      const city = normalizeCityKey(loc.city);
+      return city.length >= 2 && haystack.includes(city);
+    }) ?? null
+  );
+}
+
+/** Whether store pickup is offered for this checkout location. */
+export function isPickupAllowedForLocation(
+  locations: PickupLocation[],
+  input: {
+    region?: string;
+    label?: string;
+    settlement?: string;
+  },
+): boolean {
+  return findPickupLocation(locations, input) != null;
+}
+
+/** Format as +7 (XXX) XXX-XX-XX, or null if incomplete. */
+export function formatPickupPhone(input: string): string | null {
+  const digits = input.replace(/\D/g, '');
+  if (!digits.length) return null;
+
+  let normalized = digits;
+  if (normalized.startsWith('8')) {
+    normalized = `7${normalized.slice(1)}`;
+  }
+  if (!normalized.startsWith('7')) {
+    normalized = `7${normalized}`;
+  }
+  normalized = normalized.slice(0, 11);
+  if (normalized.length !== 11) return null;
+
+  const local = normalized.slice(1);
+  return `+7 (${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6, 8)}-${local.slice(8, 10)}`;
+}
+
+/**
+ * Normalize contact phones. Missing/invalid input falls back to defaults.
+ * Explicit empty array stays empty (caller may require at least one).
+ */
+export function normalizePickupPhones(raw: unknown): string[] {
+  if (raw === undefined || raw === null) {
+    return [...DEFAULT_PICKUP_PHONES];
+  }
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_PICKUP_PHONES];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const phone = formatPickupPhone(item);
+    if (!phone || seen.has(phone)) continue;
+    seen.add(phone);
+    out.push(phone);
+    if (out.length >= MAX_PICKUP_PHONES) break;
+  }
+  return out;
+}
 
 export function parseTimeToMinutes(value: string): number | null {
   const m = TIME_RE.exec(value.trim());
@@ -112,20 +255,48 @@ export function normalizeSchedule(raw: unknown): PickupDaySchedule[] {
 export function normalizePickupSettings(input: {
   address?: unknown;
   minLeadDays?: unknown;
+  phones?: unknown;
+  locations?: unknown;
+  /** @deprecated migrated into locations */
+  cities?: unknown;
   schedule?: unknown;
 }): PickupSettingsShape {
-  const address =
-    typeof input.address === 'string' && input.address.trim()
-      ? input.address.trim()
-      : DEFAULT_PICKUP_SETTINGS.address;
   const lead = Number(input.minLeadDays);
   const minLeadDays =
     Number.isFinite(lead) && lead >= 0 && lead <= 30
       ? Math.trunc(lead)
       : DEFAULT_PICKUP_SETTINGS.minLeadDays;
+
+  let locations = normalizePickupLocations(input.locations);
+  if (
+    !locations.length &&
+    typeof input.address === 'string' &&
+    input.address.trim()
+  ) {
+    const raw = input.address.trim();
+    const comma = raw.indexOf(',');
+    locations =
+      comma > 0
+        ? [
+            {
+              city: raw.slice(0, comma).trim(),
+              address: raw.slice(comma + 1).trim() || raw,
+            },
+          ]
+        : [{ city: raw, address: raw }];
+  }
+
+  const address = locations.length
+    ? formatPickupLocationAddress(locations[0])
+    : typeof input.address === 'string' && input.address.trim()
+      ? input.address.trim()
+      : DEFAULT_PICKUP_SETTINGS.address;
+
   return {
     address,
     minLeadDays,
+    phones: normalizePickupPhones(input.phones),
+    locations,
     schedule: normalizeSchedule(input.schedule),
   };
 }

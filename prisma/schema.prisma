@@ -249,6 +249,8 @@ model Order {
   storePickupAt        DateTime?   @map("store_pickup_at")
   /// Snapshot of store address at order time.
   storePickupAddress   String?     @map("store_pickup_address")
+  /// Snapshot of store contact phones at order time (for self-pickup).
+  storePickupPhones    String[]    @default([]) @map("store_pickup_phones")
   externalDeliveryId   String?     @map("external_delivery_id")
   deliveryTrackNumber  String?     @map("delivery_track_number")
   deliveryStatusCode   String?     @map("delivery_status_code")
@@ -379,12 +381,17 @@ model SiteSetting {
   @@map("site_settings")
 }
 
-/// Singleton store self-pickup address + weekly schedule (JSON).
+/// Singleton store self-pickup locations + weekly schedule (JSON).
 model PickupSettings {
   id          String   @id @default("default")
+  /// Legacy primary address string (kept in sync with locations[0] display).
   address     String
   /// Earliest pickup day offset from today in Europe/Moscow (1 = tomorrow).
   minLeadDays Int      @default(1) @map("min_lead_days")
+  /// Contact phones buyers should call to collect a store-pickup order.
+  phones      String[] @default(["+7 (911) 228-31-92"])
+  /// Manual pickup points: [{ city, address }].
+  locations   Json     @default("[]")
   /// Array of 7 day configs: { weekday 0=Sun..6=Sat, open, startTime "HH:mm", endTime "HH:mm" }.
   schedule    Json
   updatedAt   DateTime @updatedAt @map("updated_at")

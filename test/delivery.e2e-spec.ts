@@ -61,7 +61,7 @@ describe('Delivery methods (e2e)', () => {
 
     expect(
       remote.body.find((m: { code: string }) => m.code === 'PICKUP')?.available,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('returns unavailable methods when location is missing', async () => {

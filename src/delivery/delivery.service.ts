@@ -13,7 +13,11 @@ import {
   type DeliveryEta,
   type DeliveryMethodWithEta,
 } from './delivery-eta';
-import { scheduleSummary } from '../pickup/pickup.util';
+import {
+  findPickupLocation,
+  formatPickupLocationAddress,
+  scheduleSummary,
+} from '../pickup/pickup.util';
 
 /** Cap per-carrier ETA so one hung API cannot block checkout method list. */
 export const DELIVERY_ETA_TIMEOUT_MS = 4_000;
@@ -125,11 +129,22 @@ export class DeliveryService {
     const { region, label } = query;
     const methods = await this.list();
     let pickupNote: string | undefined;
+    let pickupAllowed = false;
     try {
       const settings = await this.pickup.getSettings();
-      pickupNote = `${settings.address} · ${scheduleSummary(settings.schedule)}`;
+      const matched = findPickupLocation(settings.locations, {
+        region,
+        label,
+        settlement: query.settlement,
+      });
+      pickupAllowed = Boolean(matched);
+      const address = matched
+        ? formatPickupLocationAddress(matched)
+        : settings.address;
+      pickupNote = `${address} · ${scheduleSummary(settings.schedule)}`;
     } catch {
       pickupNote = undefined;
+      pickupAllowed = false;
     }
     const mapped = mapDeliveryAvailability(methods, {
       region,
@@ -140,6 +155,7 @@ export class DeliveryService {
       yandexOrderReady: this.yandex.isOrderCreationConfigured(),
       yandexMoscowOnly: this.yandex.isTestEnvironment(),
       pickupNote,
+      pickupAllowed,
     });
 
     const weightGrams = Math.max(
