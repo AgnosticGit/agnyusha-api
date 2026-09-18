@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  SITE_SETTING_KEYS,
+  SITE_SETTING_BOOL_KEYS,
   SITE_SETTINGS_DEFAULTS,
   mergeSiteSettings,
+  normalizePaidOrderNotifyEmails,
   toPublicSiteSettings,
+  type PublicSiteSettings,
   type SiteSettings,
 } from './site-settings';
 
@@ -43,8 +45,12 @@ export class SettingsService {
     return value;
   }
 
-  async getPublic(): Promise<SiteSettings> {
+  async getPublic(): Promise<PublicSiteSettings> {
     return toPublicSiteSettings(await this.getAll());
+  }
+
+  async getPaidOrderNotifyEmails(): Promise<string[]> {
+    return (await this.getAll()).paidOrderNotifyEmails;
   }
 
   async isInventoryEnabled(): Promise<boolean> {
@@ -59,9 +65,14 @@ export class SettingsService {
     const current = await this.getAll();
     const next: SiteSettings = { ...current };
 
-    for (const key of SITE_SETTING_KEYS) {
+    for (const key of SITE_SETTING_BOOL_KEYS) {
       if (patch[key] === undefined) continue;
-      next[key] = Boolean(patch[key]) as never;
+      next[key] = Boolean(patch[key]);
+    }
+    if (patch.paidOrderNotifyEmails !== undefined) {
+      next.paidOrderNotifyEmails = normalizePaidOrderNotifyEmails(
+        patch.paidOrderNotifyEmails,
+      );
     }
 
     await this.prisma.siteSetting.upsert({
@@ -76,6 +87,6 @@ export class SettingsService {
   }
 
   defaults(): SiteSettings {
-    return { ...SITE_SETTINGS_DEFAULTS };
+    return { ...SITE_SETTINGS_DEFAULTS, paidOrderNotifyEmails: [] };
   }
 }

@@ -27,6 +27,7 @@ import {
   buildOrderDoneMail,
   buildOrderReadyForPickupMail,
 } from '../mail/order-done';
+import { buildPaidOrderStaffNotifyMail } from '../mail/order-paid-staff';
 import { PromosService } from '../promos/promos.service';
 import { SettingsService } from '../settings/settings.service';
 import { PickupService } from '../pickup/pickup.service';
@@ -890,8 +891,75 @@ export class OrdersService {
     });
 
     this.maybeNotifyStatusMail(existing.status, order);
+    if (status === OrderStatus.PAID && !existing.paidAt) {
+      void this.notifyStaffPaidOrder(order).catch((err) => {
+        this.logger.warn(
+          `Paid order staff mail failed for ${order.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+    }
 
     return this.mapAdmin(order);
+  }
+
+  private async notifyStaffPaidOrder(order: {
+    id: string;
+    number: number;
+    email: string;
+    phone: string;
+    lastName: string;
+    firstName: string;
+    deliveryTitle: string;
+    cityLabel: string;
+    total: number;
+    items: Array<{
+      productName: string;
+      weight: string;
+      price: number;
+      qty: number;
+    }>;
+  }) {
+    const recipients = await this.settings.getPaidOrderNotifyEmails();
+    if (!recipients.length) return;
+
+    const mail = buildPaidOrderStaffNotifyMail({
+      orderNumber: order.number,
+      total: order.total,
+      customerEmail: order.email,
+      customerName: formatPersonName({
+        lastName: order.lastName,
+        firstName: order.firstName,
+      }),
+      phone: order.phone,
+      deliveryTitle: order.deliveryTitle,
+      cityLabel: order.cityLabel,
+      webOrigin: this.webOrigin(),
+      items: order.items.map((i) => ({
+        productName: i.productName,
+        weight: i.weight,
+        qty: i.qty,
+        price: i.price,
+      })),
+    });
+
+    for (const to of recipients) {
+      try {
+        await this.sendMail({
+          to,
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Paid order staff mail failed for ${order.id} → ${to}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
   }
 
   private maybeNotifyStatusMail(

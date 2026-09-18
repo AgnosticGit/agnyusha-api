@@ -1,4 +1,10 @@
-import { IsBoolean, IsOptional } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsEmail,
+  IsOptional,
+} from 'class-validator';
 
 export class UpdateSiteSettingsDto {
   @IsOptional()
@@ -20,4 +26,10 @@ export class UpdateSiteSettingsDto {
   @IsOptional()
   @IsBoolean()
   inventoryEnabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsEmail({}, { each: true, message: 'Укажите корректный email' })
+  paidOrderNotifyEmails?: string[];
 }

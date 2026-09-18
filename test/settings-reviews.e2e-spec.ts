@@ -46,6 +46,7 @@ describe('Settings + Reviews (e2e)', () => {
       inventoryEnabled: expect.any(Boolean),
     });
     expect(res.body.freeDeliveryDisplayAmount).toBeUndefined();
+    expect(res.body.paidOrderNotifyEmails).toBeUndefined();
   });
 
   it('PATCH /api/admin/settings updates flags', async () => {
@@ -56,6 +57,24 @@ describe('Settings + Reviews (e2e)', () => {
       .expect(200);
     expect(res.body.freeDeliveryDisplayEnabled).toBe(true);
     expect(res.body.inventoryEnabled).toBe(true);
+  });
+
+  it('admin can set paid-order notify emails; public API hides them', async () => {
+    const res = await request(app.getHttpServer())
+      .patch('/api/admin/settings')
+      .set('Cookie', adminCookie)
+      .send({ paidOrderNotifyEmails: ['k_aida@bk.ru', 'K_Aida@bk.ru'] })
+      .expect(200);
+    expect(res.body.paidOrderNotifyEmails).toEqual(['k_aida@bk.ru']);
+
+    const adminGet = await request(app.getHttpServer())
+      .get('/api/admin/settings')
+      .set('Cookie', adminCookie)
+      .expect(200);
+    expect(adminGet.body.paidOrderNotifyEmails).toEqual(['k_aida@bk.ru']);
+
+    const pub = await request(app.getHttpServer()).get('/api/settings').expect(200);
+    expect(pub.body.paidOrderNotifyEmails).toBeUndefined();
   });
 
   it('hides public reviews when reviewsEnabled is false', async () => {
