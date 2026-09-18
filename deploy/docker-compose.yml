@@ -39,8 +39,13 @@ services:
       NODE_ENV: production
       PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-agnyusha}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-agnyusha}?schema=public
+      HOST_PROC_PATH: ${HOST_PROC_PATH:-/host/proc}
+      HOST_ROOT_PATH: ${HOST_ROOT_PATH:-/host/root}
     volumes:
       - uploads_data:/app/uploads
+      # Host metrics for admin/health (RAM/swap/load/disk of the VPS, not the cgroup).
+      - /proc:/host/proc:ro
+      - /:/host/root:ro
     healthcheck:
       test:
         [

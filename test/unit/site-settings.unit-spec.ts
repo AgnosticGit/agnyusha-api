@@ -1,6 +1,7 @@
 import {
   SITE_SETTINGS_DEFAULTS,
   mergeSiteSettings,
+  normalizePaidOrderNotifyEmails,
   toPublicSiteSettings,
 } from '../../src/settings/site-settings';
 
@@ -15,12 +16,14 @@ describe('site-settings', () => {
         freeDeliveryDisplayEnabled: true,
         reviewsEnabled: false,
         inventoryEnabled: true,
+        paidOrderNotifyEmails: ['K_Aida@bk.ru', 'bad', 'k_aida@bk.ru'],
       }),
     ).toEqual({
       ...SITE_SETTINGS_DEFAULTS,
       freeDeliveryDisplayEnabled: true,
       reviewsEnabled: false,
       inventoryEnabled: true,
+      paidOrderNotifyEmails: ['k_aida@bk.ru'],
     });
   });
 
@@ -33,9 +36,32 @@ describe('site-settings', () => {
     expect(mergeSiteSettings({}).inventoryEnabled).toBe(false);
   });
 
-  it('public payload is a plain copy', () => {
-    const s = mergeSiteSettings({ promosEnabled: false });
-    expect(toPublicSiteSettings(s)).toEqual(s);
-    expect(toPublicSiteSettings(s)).not.toBe(s);
+  it('normalizes notify emails', () => {
+    expect(
+      normalizePaidOrderNotifyEmails([
+        '  A@B.RU ',
+        'a@b.ru',
+        'not-an-email',
+        1,
+        '',
+      ]),
+    ).toEqual(['a@b.ru']);
+  });
+
+  it('public payload omits staff notify emails', () => {
+    const s = mergeSiteSettings({
+      promosEnabled: false,
+      paidOrderNotifyEmails: ['shop@example.com'],
+    });
+    expect(toPublicSiteSettings(s)).toEqual({
+      freeDeliveryDisplayEnabled: false,
+      reviewsEnabled: true,
+      articlesEnabled: true,
+      promosEnabled: false,
+      inventoryEnabled: false,
+    });
+    expect(toPublicSiteSettings(s)).not.toHaveProperty(
+      'paidOrderNotifyEmails',
+    );
   });
 });

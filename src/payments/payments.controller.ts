@@ -3,11 +3,11 @@ import {
   Controller,
   Headers,
   HttpCode,
-  Ip,
   Post,
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { resolveClientIp } from '../common/client-ip';
 import { ConfirmOzonPaymentDto } from './dto/confirm-ozon-payment.dto';
 import { PaymentsService } from './payments.service';
 
@@ -31,16 +31,10 @@ export class PaymentsController {
    */
   @Post('ozon/confirm')
   @HttpCode(200)
-  confirm(
-    @Body() body: ConfirmOzonPaymentDto,
-    @Ip() ip: string,
-    @Req() req: Request,
-  ) {
-    const clientKey =
-      ip ||
-      (typeof req.headers['x-forwarded-for'] === 'string'
-        ? req.headers['x-forwarded-for']
-        : 'anon');
-    return this.payments.confirmPaidByOrderId(body.orderId, clientKey);
+  confirm(@Body() body: ConfirmOzonPaymentDto, @Req() req: Request) {
+    return this.payments.confirmPaidByOrderId(
+      body.orderId,
+      resolveClientIp(req),
+    );
   }
 }

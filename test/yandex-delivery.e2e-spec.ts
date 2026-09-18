@@ -262,6 +262,7 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
             qty: 1,
           },
         ],
+        privacyConsent: true,
       })
       .expect(201);
 

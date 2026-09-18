@@ -5,40 +5,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
-
-const MAX_RANGE_DAYS = 366;
-
-function parseBoundary(
-  value: string | undefined,
-  endOfDay: boolean,
-): Date | null {
-  if (!value?.trim()) return null;
-  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
-  if (day) {
-    const d = new Date(
-      Number(day[1]),
-      Number(day[2]) - 1,
-      Number(day[3]),
-      endOfDay ? 23 : 0,
-      endOfDay ? 59 : 0,
-      endOfDay ? 59 : 0,
-      endOfDay ? 999 : 0,
-    );
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  if (endOfDay) d.setHours(23, 59, 59, 999);
-  else d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function dateKey(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
+import {
+  ANALYTICS_MAX_RANGE_DAYS,
+  analyticsDateKey,
+  resolveAnalyticsRange,
+} from './analytics-range.util';
 
 @Injectable()
 export class AnalyticsService {
@@ -77,7 +48,20 @@ export class AnalyticsService {
         status: { not: 'CANCELLED' },
         ...(selectedId ? { items: { some: { productId: selectedId } } } : {}),
       },
-      include: { items: true },
+      select: {
+        total: true,
+        createdAt: true,
+        items: {
+          select: {
+            productId: true,
+            productName: true,
+            variantId: true,
+            weight: true,
+            price: true,
+            qty: true,
+          },
+        },
+      },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -90,7 +74,7 @@ export class AnalyticsService {
       cursor.getTime() <= end.getTime();
       cursor.setDate(cursor.getDate() + 1)
     ) {
-      const key = dateKey(cursor);
+      const key = analyticsDateKey(cursor);
       dayMap.set(key, { date: key, revenue: 0, orders: 0 });
     }
 
@@ -153,7 +137,7 @@ export class AnalyticsService {
       const countedRevenue = selectedId ? dayRevenue : order.total;
       revenue += countedRevenue;
 
-      const key = dateKey(order.createdAt);
+      const key = analyticsDateKey(order.createdAt);
       const bucket = dayMap.get(key) ?? {
         date: key,
         revenue: 0,
@@ -233,34 +217,14 @@ export class AnalyticsService {
   }
 
   private resolveRange(from?: string, to?: string) {
-    const now = new Date();
-    const end =
-      parseBoundary(to, true) ??
-      (() => {
-        const d = new Date(now);
-        d.setHours(23, 59, 59, 999);
-        return d;
-      })();
-    const start =
-      parseBoundary(from, false) ??
-      (() => {
-        const d = new Date(end);
-        d.setDate(d.getDate() - 29);
-        d.setHours(0, 0, 0, 0);
-        return d;
-      })();
-
-    if (start.getTime() > end.getTime()) return null;
-
-    const rangeMs = end.getTime() - start.getTime();
-    const maxMs = MAX_RANGE_DAYS * 24 * 60 * 60 * 1000;
-    if (rangeMs > maxMs) {
+    const resolved = resolveAnalyticsRange(from, to);
+    if (!resolved.ok) {
+      if (resolved.reason === 'inverted') return null;
       throw new BadRequestException(
-        `Период аналитики не больше ${MAX_RANGE_DAYS} дней`,
+        `Период аналитики не больше ${resolved.maxDays ?? ANALYTICS_MAX_RANGE_DAYS} дней`,
       );
     }
-
-    return { start, end };
+    return { start: resolved.start, end: resolved.end };
   }
 
   private empty() {

@@ -3,6 +3,9 @@ import type { ConfigService } from '@nestjs/config';
 
 export const SESSION_COOKIE = 'agnyusha_session';
 export const OAUTH_STATE_COOKIE = 'agnyusha_oauth_state';
+/** Short-lived flag set before Google OAuth after privacy checkbox. */
+export const PRIVACY_CONSENT_COOKIE = 'agnyusha_privacy_consent';
+export const PRIVACY_CONSENT_COOKIE_TTL_MS = 15 * 60 * 1000;
 export const CART_COOKIE = 'agnyusha_cart';
 export const CART_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 

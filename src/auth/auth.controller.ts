@@ -17,12 +17,15 @@ import { ConfigService } from '@nestjs/config';
 import { AuthService, GoogleOAuthError } from './auth.service';
 import {
   RequestMagicLinkDto,
+  PrivacyConsentDto,
   UpdateProfileDto,
   VerifyMagicLinkDto,
 } from './dto/auth.dto';
 import {
   CART_COOKIE,
   OAUTH_STATE_COOKIE,
+  PRIVACY_CONSENT_COOKIE,
+  PRIVACY_CONSENT_COOKIE_TTL_MS,
   SESSION_COOKIE,
   clearCookieOptions,
   cookieSameSite,
@@ -30,6 +33,7 @@ import {
   createRawToken,
   sessionCookieOptions,
 } from './auth.crypto';
+import { resolveClientIp } from '../common/client-ip';
 import { CartService } from '../cart/cart.service';
 import { AuthGuard, type AuthedRequest } from './auth.guard';
 
@@ -41,14 +45,6 @@ function rawQueryParam(req: Request, name: string): string | undefined {
     name,
   );
   return value ?? undefined;
-}
-
-function clientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.trim()) {
-    return forwarded.split(',')[0].trim();
-  }
-  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
 @Controller('auth')
@@ -76,13 +72,42 @@ export class AuthController {
     );
   }
 
+  private clearPrivacyConsentCookie(res: Response) {
+    res.clearCookie(
+      PRIVACY_CONSENT_COOKIE,
+      clearCookieOptions(this.secureCookies(), this.sameSite()),
+    );
+  }
+
   @Post('magic-link')
   @HttpCode(200)
   async requestMagicLink(
     @Body() body: RequestMagicLinkDto,
     @Req() req: Request,
   ) {
-    return this.auth.requestMagicLink(body.email, clientIp(req));
+    return this.auth.requestMagicLink(body.email, {
+      clientIp: resolveClientIp(req),
+      privacyConsent: body.privacyConsent,
+    });
+  }
+
+  /** Marks that the user accepted privacy policy before Google OAuth redirect. */
+  @Post('privacy-consent')
+  @HttpCode(200)
+  privacyConsent(
+    @Body() body: PrivacyConsentDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    res.cookie(
+      PRIVACY_CONSENT_COOKIE,
+      '1',
+      sessionCookieOptions(
+        this.secureCookies(),
+        PRIVACY_CONSENT_COOKIE_TTL_MS,
+        this.sameSite(),
+      ),
+    );
+    return { ok: true as const };
   }
 
   @Post('verify')
@@ -102,6 +127,7 @@ export class AuthController {
         this.sameSite(),
       ),
     );
+    this.clearPrivacyConsentCookie(res);
     const cart = await this.cart.mergeGuestIntoUser(
       result.user.id,
       req.cookies?.[CART_COOKIE],
@@ -143,9 +169,15 @@ export class AuthController {
   }
 
   @Get('google')
-  googleStart(@Res() res: Response) {
+  googleStart(@Req() req: Request, @Res() res: Response) {
     if (!this.auth.isGoogleConfigured()) {
       throw new ServiceUnavailableException('Вход через Google не настроен');
+    }
+    if (req.cookies?.[PRIVACY_CONSENT_COOKIE] !== '1') {
+      const web = this.auth.webOrigin();
+      return res.redirect(
+        `${web}/auth/callback?error=${encodeURIComponent('privacy_consent')}`,
+      );
     }
     const state = createRawToken(24);
     res.cookie(OAUTH_STATE_COOKIE, state, {
@@ -163,6 +195,7 @@ export class AuthController {
     const web = this.auth.webOrigin();
     const fail = (reason: string) => {
       this.clearOAuthState(res);
+      this.clearPrivacyConsentCookie(res);
       return res.redirect(
         `${web}/auth/callback?error=${encodeURIComponent(reason)}`,
       );
@@ -186,8 +219,12 @@ export class AuthController {
     }
 
     try {
-      const result = await this.auth.loginWithGoogleCode(code);
+      const privacyConsent = req.cookies?.[PRIVACY_CONSENT_COOKIE] === '1';
+      const result = await this.auth.loginWithGoogleCode(code, {
+        privacyConsent,
+      });
       this.clearOAuthState(res);
+      this.clearPrivacyConsentCookie(res);
       res.cookie(
         SESSION_COOKIE,
         result.sessionToken,

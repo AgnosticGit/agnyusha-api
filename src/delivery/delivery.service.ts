@@ -4,6 +4,7 @@ import { CdekService } from '../cdek/cdek.service';
 import { YandexDeliveryService } from '../yandex/yandex-delivery.service';
 import { PochtaService } from '../pochta/pochta.service';
 import { OzonDeliveryService } from '../ozon-delivery/ozon-delivery.service';
+import { PickupService } from '../pickup/pickup.service';
 import { withTimeout } from '../common/http-utils';
 import { mapDeliveryAvailability } from './delivery-availability';
 import {
@@ -12,6 +13,7 @@ import {
   type DeliveryEta,
   type DeliveryMethodWithEta,
 } from './delivery-eta';
+import { scheduleSummary } from '../pickup/pickup.util';
 
 /** Cap per-carrier ETA so one hung API cannot block checkout method list. */
 export const DELIVERY_ETA_TIMEOUT_MS = 4_000;
@@ -28,6 +30,11 @@ export type DeliveryMethodsQuery = {
 @Injectable()
 export class DeliveryService {
   private readonly logger = new Logger(DeliveryService.name);
+  private activeMethodsCache: {
+    value: Awaited<ReturnType<DeliveryService['listUncached']>>;
+    expiresAt: number;
+  } | null = null;
+  private static readonly METHODS_CACHE_TTL_MS = 5_000;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -35,9 +42,10 @@ export class DeliveryService {
     private readonly yandex: YandexDeliveryService,
     private readonly pochta: PochtaService,
     private readonly ozonDelivery: OzonDeliveryService,
+    private readonly pickup: PickupService,
   ) {}
 
-  list() {
+  private listUncached() {
     return this.prisma.deliveryMethod.findMany({
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
@@ -48,6 +56,26 @@ export class DeliveryService {
         description: true,
       },
     });
+  }
+
+  async list() {
+    const cacheDisabled = process.env.NODE_ENV === 'test';
+    const now = Date.now();
+    if (
+      !cacheDisabled &&
+      this.activeMethodsCache &&
+      this.activeMethodsCache.expiresAt > now
+    ) {
+      return this.activeMethodsCache.value;
+    }
+    const value = await this.listUncached();
+    if (!cacheDisabled) {
+      this.activeMethodsCache = {
+        value,
+        expiresAt: now + DeliveryService.METHODS_CACHE_TTL_MS,
+      };
+    }
+    return value;
   }
 
   adminList() {
@@ -87,6 +115,7 @@ export class DeliveryService {
         }),
       ),
     );
+    this.activeMethodsCache = null;
     return this.adminList();
   }
 
@@ -95,6 +124,13 @@ export class DeliveryService {
   ): Promise<DeliveryMethodWithEta[]> {
     const { region, label } = query;
     const methods = await this.list();
+    let pickupNote: string | undefined;
+    try {
+      const settings = await this.pickup.getSettings();
+      pickupNote = `${settings.address} · ${scheduleSummary(settings.schedule)}`;
+    } catch {
+      pickupNote = undefined;
+    }
     const mapped = mapDeliveryAvailability(methods, {
       region,
       label,
@@ -103,6 +139,7 @@ export class DeliveryService {
       ozonReady: this.ozonDelivery.isOrderCreationConfigured(),
       yandexOrderReady: this.yandex.isOrderCreationConfigured(),
       yandexMoscowOnly: this.yandex.isTestEnvironment(),
+      pickupNote,
     });
 
     const weightGrams = Math.max(

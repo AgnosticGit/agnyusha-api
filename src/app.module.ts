@@ -21,6 +21,7 @@ import { SettingsModule } from './settings/settings.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { PromosModule } from './promos/promos.module';
 import { ArticlesModule } from './articles/articles.module';
+import { PickupModule } from './pickup/pickup.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { ArticlesModule } from './articles/articles.module';
     ReviewsModule,
     PromosModule,
     ArticlesModule,
+    PickupModule,
   ],
   providers: [
     {

@@ -35,6 +35,7 @@ enum StaffPermission {
   PROMO_MANAGE
   REVIEW_MANAGE
   SETTINGS_MANAGE
+  PICKUP_MANAGE
 }
 
 enum ProductCategory {
@@ -94,6 +95,8 @@ model User {
   firstName       String           @default("") @map("first_name")
   role            UserRole         @default(USER)
   bannedAt        DateTime?        @map("banned_at")
+  /// When the user accepted personal-data processing (152-FZ).
+  privacyConsentAt DateTime?       @map("privacy_consent_at")
   createdAt       DateTime         @default(now()) @map("created_at")
   magicLinks      MagicLink[]
   sessions        Session[]
@@ -242,6 +245,10 @@ model Order {
   deliveryTitle        String      @map("delivery_title")
   pickupLabel          String?     @map("pickup_label")
   pickupCode           String?     @map("pickup_code")
+  /// Store self-pickup slot chosen by the buyer (Moscow local wall time stored as UTC Instant).
+  storePickupAt        DateTime?   @map("store_pickup_at")
+  /// Snapshot of store address at order time.
+  storePickupAddress   String?     @map("store_pickup_address")
   externalDeliveryId   String?     @map("external_delivery_id")
   deliveryTrackNumber  String?     @map("delivery_track_number")
   deliveryStatusCode   String?     @map("delivery_status_code")
@@ -370,4 +377,35 @@ model SiteSetting {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("site_settings")
+}
+
+/// Singleton store self-pickup address + weekly schedule (JSON).
+model PickupSettings {
+  id          String   @id @default("default")
+  address     String
+  /// Earliest pickup day offset from today in Europe/Moscow (1 = tomorrow).
+  minLeadDays Int      @default(1) @map("min_lead_days")
+  /// Array of 7 day configs: { weekday 0=Sun..6=Sat, open, startTime "HH:mm", endTime "HH:mm" }.
+  schedule    Json
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("pickup_settings")
+}
+
+/// Hourly host resource snapshots for admin/health charts (kept ≤ 3 days).
+model HostMetricHourly {
+  id             String   @id @default(cuid())
+  recordedAt     DateTime @map("recorded_at")
+  memTotalMb     Float    @map("mem_total_mb")
+  memAvailableMb Float    @map("mem_available_mb")
+  memUsedPct     Float    @map("mem_used_pct")
+  swapTotalMb    Float    @map("swap_total_mb")
+  swapUsedMb     Float    @map("swap_used_mb")
+  load1          Float
+  diskTotalMb    Float    @map("disk_total_mb")
+  diskUsedPct    Float    @map("disk_used_pct")
+  source         String
+
+  @@index([recordedAt])
+  @@map("host_metric_hourly")
 }

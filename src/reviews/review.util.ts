@@ -24,8 +24,24 @@ export function computeRatingAggregate(
   const valid = ratings.filter((r) => r >= 1 && r <= 5);
   if (!valid.length) return { average: 0, count: 0 };
   const sum = valid.reduce((a, b) => a + b, 0);
+  return averageFromSum(sum, valid.length);
+}
+
+/** Round Prisma `_avg` / `_count` the same way as `computeRatingAggregate`. */
+export function averageFromAggregate(
+  avg: number | null | undefined,
+  count: number,
+): { average: number; count: number } {
+  if (!count || count < 0) return { average: 0, count: 0 };
   return {
-    average: Math.round((sum / valid.length) * 10) / 10,
-    count: valid.length,
+    average: Math.round((Number(avg) || 0) * 10) / 10,
+    count,
+  };
+}
+
+function averageFromSum(sum: number, count: number) {
+  return {
+    average: Math.round((sum / count) * 10) / 10,
+    count,
   };
 }

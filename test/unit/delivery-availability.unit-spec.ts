@@ -57,10 +57,10 @@ describe('delivery-availability', () => {
       yandexMoscowOnly: false,
     });
     expect(rows.every((r) => r.available === false)).toBe(true);
-    expect(rows.map((r) => r.code).slice(-2)).toEqual(['PICKUP', 'OZON']);
+    expect(rows.map((r) => r.code).slice(-1)).toEqual(['OZON']);
   });
 
-  it('keeps PICKUP and OZON blocked and last', () => {
+  it('keeps OZON blocked and last; PICKUP available with note', () => {
     const local = mapDeliveryAvailability(methods, {
       region: 'Санкт-Петербург',
       label: 'СПб',
@@ -69,14 +69,16 @@ describe('delivery-availability', () => {
       ozonReady: true,
       yandexOrderReady: true,
       yandexMoscowOnly: false,
+      pickupNote: 'Санкт-Петербург, Гранитная 51 · пн–сб 12:00–14:00',
     });
-    expect(local.find((m) => m.code === 'PICKUP')?.available).toBe(false);
+    expect(local.find((m) => m.code === 'PICKUP')?.available).toBe(true);
+    expect(local.find((m) => m.code === 'PICKUP')?.note).toContain('Гранитная');
     expect(local.find((m) => m.code === 'OZON')?.available).toBe(false);
     expect(local.map((m) => m.code)).toEqual([
+      'PICKUP',
       'CDEK',
       'YANDEX',
       'POST',
-      'PICKUP',
       'OZON',
     ]);
 
@@ -89,7 +91,7 @@ describe('delivery-availability', () => {
       yandexOrderReady: true,
       yandexMoscowOnly: false,
     });
-    expect(remote.find((m) => m.code === 'PICKUP')?.available).toBe(false);
+    expect(remote.find((m) => m.code === 'PICKUP')?.available).toBe(true);
     expect(remote.find((m) => m.code === 'OZON')?.available).toBe(false);
   });
 

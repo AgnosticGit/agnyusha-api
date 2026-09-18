@@ -1,38 +1,13 @@
 import type { INestApplication } from '@nestjs/common';
+import { testStorePickupAt } from './helpers/pickup-slot';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
 import {
   createTestApp,
   setSiteInventoryEnabled,
 } from './helpers/cdek-test.helpers';
+import { loginAs } from './helpers/login-as';
 import { PrismaService } from '../src/prisma/prisma.service';
-import {
-  createRawToken,
-  hashToken,
-  SESSION_COOKIE,
-} from '../src/auth/auth.crypto';
-
-async function loginAs(
-  app: INestApplication,
-  email: string,
-  role: UserRole = UserRole.USER,
-) {
-  const prisma = app.get(PrismaService);
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: { email, role },
-    update: { role },
-  });
-  const raw = createRawToken();
-  await prisma.session.create({
-    data: {
-      userId: user.id,
-      tokenHash: hashToken(raw),
-      expiresAt: new Date(Date.now() + 86400000),
-    },
-  });
-  return { user, cookie: `${SESSION_COOKIE}=${raw}` };
-}
 
 describe('Orders inventory (e2e)', () => {
   let app: INestApplication;
@@ -106,6 +81,8 @@ describe('Orders inventory (e2e)', () => {
       cityLabel: 'Санкт-Петербург',
       deliveryCode: 'PICKUP',
       deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
+      privacyConsent: true,
       items: [
         {
           productId: product.id,

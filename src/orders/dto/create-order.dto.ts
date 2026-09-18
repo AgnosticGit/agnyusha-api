@@ -1,6 +1,7 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEmail,
   IsInt,
   IsOptional,
@@ -86,10 +87,20 @@ export class CreateOrderDto {
   @IsString()
   pickupCode?: string;
 
+  /** ISO datetime for store self-pickup slot (required when deliveryCode is PICKUP). */
+  @IsOptional()
+  @IsString()
+  storePickupAt?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(64)
   promoCode?: string;
+
+  /** Required when the buyer has not yet accepted personal-data processing. */
+  @IsOptional()
+  @IsBoolean()
+  privacyConsent?: boolean;
 
   @IsArray()
   @ArrayMinSize(1)

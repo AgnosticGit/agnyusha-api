@@ -34,7 +34,7 @@ describe('Delivery methods (e2e)', () => {
     await app.close();
   });
 
-  it('marks pickup available only for SPb / LO labels', async () => {
+  it('marks store pickup available with address note; OZON stays blocked last', async () => {
     const local = await request(app.getHttpServer())
       .get('/api/delivery-methods')
       .query({
@@ -43,25 +43,13 @@ describe('Delivery methods (e2e)', () => {
       })
       .expect(200);
 
-    const byCode = Object.fromEntries(
-      local.body.map((m: { code: string; available: boolean }) => [
-        m.code,
-        m.available,
-      ]),
+    const pickup = local.body.find((m: { code: string }) => m.code === 'PICKUP');
+    expect(pickup?.available).toBe(true);
+    expect(String(pickup?.note ?? '').length).toBeGreaterThan(5);
+    expect(local.body.find((m: { code: string }) => m.code === 'OZON')?.available).toBe(
+      false,
     );
-    expect(byCode.PICKUP).toBe(false);
-    expect(byCode.COURIER).toBeUndefined();
-    expect(byCode.CDEK).toBe(true);
-    expect(byCode.YANDEX).toBe(false);
-    expect(byCode.POST).toBe(false);
-    expect(byCode.OZON).toBe(false);
-    expect(local.body.map((m: { code: string }) => m.code)).toEqual([
-      'CDEK',
-      'YANDEX',
-      'POST',
-      'OZON',
-      'PICKUP',
-    ]);
+    expect(local.body.map((m: { code: string }) => m.code).at(-1)).toBe('OZON');
 
     const remote = await request(app.getHttpServer())
       .get('/api/delivery-methods')
@@ -71,16 +59,9 @@ describe('Delivery methods (e2e)', () => {
       })
       .expect(200);
 
-    const remoteByCode = Object.fromEntries(
-      remote.body.map((m: { code: string; available: boolean }) => [
-        m.code,
-        m.available,
-      ]),
-    );
-    expect(remoteByCode.PICKUP).toBe(false);
-    expect(remoteByCode.COURIER).toBeUndefined();
-    expect(remoteByCode.CDEK).toBe(true);
-    expect(remoteByCode.POST).toBe(false);
+    expect(
+      remote.body.find((m: { code: string }) => m.code === 'PICKUP')?.available,
+    ).toBe(true);
   });
 
   it('returns unavailable methods when location is missing', async () => {

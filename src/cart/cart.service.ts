@@ -177,6 +177,24 @@ export class CartService {
     };
   }
 
+  /** Build cart view from known lines without reloading the cart row. */
+  private async buildCartResponse(
+    cartId: string,
+    raw: Array<{ variantId: string; qty: number }>,
+  ): Promise<CartResponse> {
+    const variants = await this.loadVariants(raw.map((i) => i.variantId));
+    const inventoryEnabled = await this.settings.isInventoryEnabled();
+    const { items, adjustments } = this.sanitizeLines(
+      raw,
+      variants,
+      inventoryEnabled,
+    );
+    if (adjustments.removed.length || adjustments.capped.length) {
+      await this.persistSanitized(cartId, items);
+    }
+    return { items, adjustments };
+  }
+
   private async persistSanitized(
     cartId: string,
     items: CartLineView[],
@@ -395,15 +413,12 @@ export class CartService {
       await this.prisma.cartItem.deleteMany({
         where: { cartId: cart.id, variantId: opts.variantId },
       });
-      return {
-        ...(opts.userId
-          ? await this.getCartForUser(opts.userId)
-          : await this.getOrResolveCart({
-              guestRawToken: guestToken ?? opts.guestRawToken,
-              res: opts.res,
-            })),
-        guestToken,
-      };
+      const nextItems = cart.items.filter((i) => i.variantId !== opts.variantId);
+      const built = await this.buildCartResponse(cart.id, nextItems);
+      if (guestToken ?? opts.guestRawToken) {
+        this.setGuestCookie(opts.res, guestToken ?? opts.guestRawToken!);
+      }
+      return { ...built, guestToken };
     }
 
     const variants = await this.loadVariants([opts.variantId]);
@@ -452,16 +467,33 @@ export class CartService {
       });
     }
 
-    const refreshed = opts.userId
-      ? await this.getCartForUser(opts.userId)
-      : await this.getOrResolveCart({
-          guestRawToken: guestToken ?? opts.guestRawToken,
-          res: opts.res,
-        });
+    const nextItems = existing
+      ? cart.items.map((i) =>
+          i.variantId === opts.variantId ? { ...i, qty: capped } : i,
+        )
+      : [...cart.items, { variantId: opts.variantId, qty: capped }];
+
+    const otherIds = nextItems
+      .map((i) => i.variantId)
+      .filter((id) => id !== opts.variantId);
+    const otherVariants =
+      otherIds.length > 0
+        ? await this.loadVariants(otherIds)
+        : new Map<string, VariantWithProduct>();
+    otherVariants.set(opts.variantId, variant);
+
+    const { items, adjustments: sanitizeAdj } = this.sanitizeLines(
+      nextItems,
+      otherVariants,
+      inventoryEnabled,
+    );
+    if (sanitizeAdj.removed.length || sanitizeAdj.capped.length) {
+      await this.persistSanitized(cart.id, items);
+    }
 
     return {
-      items: refreshed.items,
-      adjustments: this.mergeAdjustments(adjustments, refreshed.adjustments),
+      items,
+      adjustments: this.mergeAdjustments(adjustments, sanitizeAdj),
       guestToken,
     };
   }

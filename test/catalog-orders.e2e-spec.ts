@@ -1,42 +1,31 @@
 import type { INestApplication } from '@nestjs/common';
+import { testStorePickupAt } from './helpers/pickup-slot';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
 import { createTestApp, setSiteInventoryEnabled } from './helpers/cdek-test.helpers';
+import { loginAs } from './helpers/login-as';
+import { createUniqueSkuFactory } from './helpers/unique-sku';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { hashToken, createRawToken } from '../src/auth/auth.crypto';
-import { SESSION_COOKIE } from '../src/auth/auth.crypto';
-
-async function loginAs(
-  app: INestApplication,
-  email: string,
-  role: UserRole = UserRole.USER,
-) {
-  const prisma = app.get(PrismaService);
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: { email, role },
-    update: { role },
-  });
-  const raw = createRawToken();
-  await prisma.session.create({
-    data: {
-      userId: user.id,
-      tokenHash: hashToken(raw),
-      expiresAt: new Date(Date.now() + 86400000),
-    },
-  });
-  return { user, cookie: `${SESSION_COOKIE}=${raw}` };
-}
+import {
+  createRawToken,
+  hashToken,
+  SESSION_COOKIE,
+} from '../src/auth/auth.crypto';
 
 describe('Catalog admin & orders (e2e)', () => {
   let app: INestApplication;
+  let prisma: PrismaService;
+  const uniqueSku = createUniqueSkuFactory('E2E');
 
   beforeAll(async () => {
     const created = await createTestApp({ cdek: 'missing', yandex: 'missing' });
     app = created.app;
+    prisma = app.get(PrismaService);
+    await setSiteInventoryEnabled(prisma, false);
   });
 
   afterAll(async () => {
+    await setSiteInventoryEnabled(prisma, false);
     await app.close();
   });
 
@@ -46,6 +35,31 @@ describe('Catalog admin & orders (e2e)', () => {
       .expect(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThan(0);
+
+    const first = res.body[0] as {
+      id: string;
+      slug: string;
+      name: string;
+      image: string;
+      sections: unknown[];
+      variants: Array<{ id: string; weight: string; price: number; stock: number }>;
+      fromPrice: number;
+    };
+    expect(first.id).toBeTruthy();
+    expect(first.slug).toBeTruthy();
+    expect(first.name).toBeTruthy();
+    expect(first.image).toBeTruthy();
+    expect(first.sections).toEqual([]);
+    expect(first.variants.length).toBeGreaterThan(0);
+    expect(first.variants[0]).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        weight: expect.any(String),
+        price: expect.any(Number),
+        stock: expect.any(Number),
+      }),
+    );
+    expect(first.fromPrice).toBe(first.variants[0].price);
   });
 
   it('returns product by slug with sections', async () => {
@@ -107,7 +121,9 @@ describe('Catalog admin & orders (e2e)', () => {
   });
 
   it('admin can create product and user can place order', async () => {
+    await setSiteInventoryEnabled(prisma, false);
     const admin = await loginAs(app, 'admin-e2e@example.com', UserRole.ADMIN);
+    const testSku = uniqueSku('E2E-TEST');
     const create = await request(app.getHttpServer())
       .post('/api/admin/products')
       .set('Cookie', admin.cookie)
@@ -118,7 +134,7 @@ describe('Catalog admin & orders (e2e)', () => {
         badge: 'HIT',
         variants: [
           {
-            sku: 'E2E-TEST-01',
+            sku: testSku,
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -138,7 +154,7 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(create.body.badgeLabel).toBe('Хит');
     expect(create.body.badgeColor).toBe('#5fa88a');
     expect(create.body.isPopular).toBe(true);
-    expect(create.body.variants[0].sku).toBe('E2E-TEST-01');
+    expect(create.body.variants[0].sku).toBe(testSku);
     expect(create.body.variants[0].stock).toBe(10);
     expect(create.body.variants[0].weightGrams).toBe(1000);
 
@@ -150,7 +166,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-XSS-01',
+            sku: uniqueSku('E2E-XSS'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -183,7 +199,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'CATS',
         variants: [
           {
-            sku: 'E2E-BADGE-01',
+            sku: uniqueSku('E2E-BADGE'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -233,6 +249,7 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [
           {
             productId: create.body.id,
@@ -244,6 +261,7 @@ describe('Catalog admin & orders (e2e)', () => {
             qty: 2,
           },
         ],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -288,6 +306,7 @@ describe('Catalog admin & orders (e2e)', () => {
       'admin-images@example.com',
       UserRole.ADMIN,
     );
+    const imgSku = uniqueSku('E2E-IMG');
     const create = await request(app.getHttpServer())
       .post('/api/admin/products')
       .set('Cookie', admin.cookie)
@@ -296,7 +315,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-IMG-01',
+            sku: imgSku,
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -339,7 +358,7 @@ describe('Catalog admin & orders (e2e)', () => {
         variants: [
           {
             id: create.body.variants[0].id,
-            sku: 'E2E-IMG-01',
+            sku: imgSku,
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -436,6 +455,50 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(empty.body.items).toEqual([]);
   });
 
+  it('admin cannot role/ban unverified user but can delete', async () => {
+    const admin = await loginAs(app, 'agnostex@gmail.com', UserRole.ADMIN);
+    const prisma = app.get(PrismaService);
+    const pending = await prisma.user.upsert({
+      where: { email: 'pending-activate@example.com' },
+      create: {
+        email: 'pending-activate@example.com',
+        role: UserRole.USER,
+        emailVerifiedAt: null,
+      },
+      update: { role: UserRole.USER, emailVerifiedAt: null },
+    });
+
+    const listed = await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .query({ q: 'pending-activate', page: 1, limit: 20 })
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
+    expect(listed.body.items).toHaveLength(1);
+    expect(listed.body.items[0].emailVerifiedAt).toBeNull();
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${pending.id}/role`)
+      .set('Cookie', admin.cookie)
+      .send({ role: 'STAFF', permissions: ['USER_MANAGE'] })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${pending.id}/ban`)
+      .set('Cookie', admin.cookie)
+      .send({ banned: true })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/users/${pending.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+
+    expect(
+      await prisma.user.findUnique({ where: { id: pending.id } }),
+    ).toBeNull();
+  });
+
   it('admin can ban and delete user', async () => {
     const admin = await loginAs(app, 'agnostex@gmail.com', UserRole.ADMIN);
     const target = await loginAs(app, 'ban-me@example.com', UserRole.USER);
@@ -501,7 +564,7 @@ describe('Catalog admin & orders (e2e)', () => {
 
   it('staff permissions gate product and inventory APIs', async () => {
     const lead = await loginAs(app, 'lead-e2e@example.com', UserRole.STAFF);
-    const prisma = app.get(PrismaService);
+    await setSiteInventoryEnabled(prisma, false);
     await prisma.userPermission.deleteMany({ where: { userId: lead.user.id } });
     await prisma.userPermission.createMany({
       data: [
@@ -511,8 +574,12 @@ describe('Catalog admin & orders (e2e)', () => {
     });
     const staffUser = await prisma.user.upsert({
       where: { email: 'staff-stock@example.com' },
-      create: { email: 'staff-stock@example.com', role: UserRole.STAFF },
-      update: { role: UserRole.STAFF },
+      create: {
+        email: 'staff-stock@example.com',
+        role: UserRole.STAFF,
+        emailVerifiedAt: new Date(),
+      },
+      update: { role: UserRole.STAFF, emailVerifiedAt: new Date() },
     });
     await prisma.userPermission.deleteMany({ where: { userId: staffUser.id } });
     await prisma.userPermission.create({
@@ -539,7 +606,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'NOPE-01',
+            sku: uniqueSku('NOPE'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -561,7 +628,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'STOCK-GATE-01',
+            sku: uniqueSku('STOCK-GATE'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -623,6 +690,7 @@ describe('Catalog admin & orders (e2e)', () => {
           cityLabel: 'Москва',
           deliveryCode: 'PICKUP',
           deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
           items: [
             {
               productId: created.body.id,
@@ -634,7 +702,8 @@ describe('Catalog admin & orders (e2e)', () => {
               qty: 99,
             },
           ],
-        })
+        privacyConsent: true,
+      })
         .expect(400);
     } finally {
       await setSiteInventoryEnabled(prisma, false);
@@ -711,7 +780,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-PRICE-01',
+            sku: uniqueSku('E2E-PRICE'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -739,6 +808,7 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [
           {
             variantId: created.body.variants[0].id,
@@ -749,6 +819,7 @@ describe('Catalog admin & orders (e2e)', () => {
             qty: 2,
           },
         ],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -768,7 +839,9 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId: 'missing-variant', qty: 1 }],
+        privacyConsent: true,
       })
       .expect(400);
 
@@ -790,7 +863,9 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(400);
 
@@ -814,7 +889,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-GUEST-01',
+            sku: uniqueSku('E2E-GUEST'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -839,7 +914,9 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -861,6 +938,7 @@ describe('Catalog admin & orders (e2e)', () => {
     });
     expect(account?.emailVerifiedAt).toBeNull();
     expect(account?.lastName).toBe('Иванов');
+    expect(account?.privacyConsentAt).toBeTruthy();
 
     const mine = await request(app.getHttpServer())
       .get('/api/orders')
@@ -869,6 +947,56 @@ describe('Catalog admin & orders (e2e)', () => {
     expect(mine.body.items.some((o: { id: string }) => o.id === order.body.id)).toBe(
       true,
     );
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${created.body.id}`)
+      .set('Cookie', admin.cookie)
+      .expect(200);
+  });
+
+  it('rejects guest order without privacy consent', async () => {
+    const admin = await loginAs(
+      app,
+      'admin-guest-consent@example.com',
+      UserRole.ADMIN,
+    );
+    const created = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', admin.cookie)
+      .send({
+        name: 'Consent Gate',
+        category: 'DOGS',
+        variants: [
+          {
+            sku: uniqueSku('E2E-CONSENT'),
+            weight: '1 кг.',
+            weightGrams: 1000,
+            lengthCm: 20,
+            widthCm: 15,
+            heightCm: 10,
+            price: 500,
+            stock: 2,
+          },
+        ],
+        sections: [{ title: 'Состав', body: '<p>t</p>' }],
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .send({
+        email: 'no-consent-guest@example.com',
+        lastName: 'Иванов',
+        firstName: 'Иван',
+        phone: '+7 (900) 555-00-11',
+        contactChannel: 'WhatsApp',
+        cityLabel: 'Санкт-Петербург',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
+        items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+      })
+      .expect(400);
 
     await request(app.getHttpServer())
       .delete(`/api/admin/products/${created.body.id}`)
@@ -900,7 +1028,7 @@ describe('Catalog admin & orders (e2e)', () => {
         category: 'DOGS',
         variants: [
           {
-            sku: 'E2E-GUEST-VER-01',
+            sku: uniqueSku('E2E-GUEST-VER'),
             weight: '1 кг.',
             weightGrams: 1000,
             lengthCm: 20,
@@ -929,7 +1057,9 @@ describe('Catalog admin & orders (e2e)', () => {
         cityLabel: 'Москва',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId: created.body.variants[0].id, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(400);
 

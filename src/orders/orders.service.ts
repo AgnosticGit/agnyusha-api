@@ -27,8 +27,10 @@ import {
   buildOrderDoneMail,
   buildOrderReadyForPickupMail,
 } from '../mail/order-done';
+import { buildPaidOrderStaffNotifyMail } from '../mail/order-paid-staff';
 import { PromosService } from '../promos/promos.service';
 import { SettingsService } from '../settings/settings.service';
+import { PickupService } from '../pickup/pickup.service';
 import { CdekEntityNotFoundError } from '../cdek/cdek.errors';
 import { PochtaEntityNotFoundError } from '../pochta/pochta.errors';
 import { YandexEntityNotFoundError } from '../yandex/yandex.errors';
@@ -70,6 +72,7 @@ export class OrdersService {
     private readonly payments: PaymentsService,
     private readonly promos: PromosService,
     private readonly settings: SettingsService,
+    private readonly pickup: PickupService,
     private readonly config: ConfigService,
     @Inject(MAIL_SEND) private readonly sendMail: MailSend,
   ) {}
@@ -121,32 +124,49 @@ export class OrdersService {
   /** Resolve cart lines from DB — never trust client price/name/image. */
   private async resolveItems(
     items: CreateOrderDto['items'],
+    inventoryEnabled?: boolean,
   ): Promise<ResolvedLine[]> {
-    const resolved: ResolvedLine[] = [];
-    const inventoryEnabled = await this.settings.isInventoryEnabled();
-
-    for (const item of items) {
-      if (!item.variantId?.trim()) {
+    const inventoryOn =
+      inventoryEnabled ?? (await this.settings.isInventoryEnabled());
+    const variantIds = items.map((item) => {
+      const id = item.variantId?.trim();
+      if (!id) {
         throw new BadRequestException('Укажите вариант товара (variantId)');
       }
+      return id;
+    });
 
-      const variant = await this.prisma.productVariant.findUnique({
-        where: { id: item.variantId.trim() },
-        include: { product: true },
-      });
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: [...new Set(variantIds)] } },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            isActive: true,
+          },
+        },
+      },
+    });
+    const byId = new Map(variants.map((v) => [v.id, v]));
+
+    return items.map((item) => {
+      const variantId = item.variantId!.trim();
+      const variant = byId.get(variantId);
 
       if (!variant || !variant.product.isActive) {
         throw new BadRequestException(
           'Товар недоступен для заказа — обновите корзину',
         );
       }
-      if (inventoryEnabled && variant.stock < item.qty) {
+      if (inventoryOn && variant.stock < item.qty) {
         throw new BadRequestException(
           `В наличии только ${variant.stock} шт. — ${variant.product.name} (${variant.weight})`,
         );
       }
 
-      resolved.push({
+      return {
         productId: variant.productId,
         variantId: variant.id,
         sku: variant.sku,
@@ -159,10 +179,8 @@ export class OrdersService {
         heightCm: variant.heightCm,
         price: variant.price,
         qty: item.qty,
-      });
-    }
-
-    return resolved;
+      };
+    });
   }
 
   async create(
@@ -185,7 +203,15 @@ export class OrdersService {
     }
 
     const sessionUser = sessionUserId
-      ? await this.prisma.user.findUnique({ where: { id: sessionUserId } })
+      ? await this.prisma.user.findUnique({
+          where: { id: sessionUserId },
+          select: {
+            id: true,
+            email: true,
+            emailVerifiedAt: true,
+            privacyConsentAt: true,
+          },
+        })
       : null;
     if (sessionUserId && !sessionUser) {
       throw new BadRequestException('Сессия недействительна — войдите снова');
@@ -201,6 +227,7 @@ export class OrdersService {
       firstName,
     });
 
+    const consentNow = new Date();
     const owner = sessionUser
       ? sessionUser
       : await (async () => {
@@ -213,10 +240,27 @@ export class OrdersService {
                 'Этот email уже зарегистрирован. Войдите в аккаунт, чтобы оформить заказ.',
               );
             }
+            if (!existing.privacyConsentAt && dto.privacyConsent !== true) {
+              throw new BadRequestException(
+                'Нужно согласие на обработку персональных данных',
+              );
+            }
             return this.prisma.user.update({
               where: { id: existing.id },
-              data: { phone, lastName, firstName },
+              data: {
+                phone,
+                lastName,
+                firstName,
+                ...(existing.privacyConsentAt
+                  ? {}
+                  : { privacyConsentAt: consentNow }),
+              },
             });
+          }
+          if (dto.privacyConsent !== true) {
+            throw new BadRequestException(
+              'Нужно согласие на обработку персональных данных',
+            );
           }
           return this.prisma.user.create({
             data: {
@@ -224,22 +268,36 @@ export class OrdersService {
               phone,
               lastName,
               firstName,
+              privacyConsentAt: consentNow,
             },
           });
         })();
 
     const establishSessionUserId = sessionUser ? null : owner.id;
 
-    // Logged-in user: keep profile in sync with checkout.
+    // Logged-in user: keep profile in sync with checkout (+ consent if missing).
     if (sessionUser) {
+      if (!sessionUser.privacyConsentAt && dto.privacyConsent !== true) {
+        throw new BadRequestException(
+          'Нужно согласие на обработку персональных данных',
+        );
+      }
       await this.prisma.user.update({
         where: { id: sessionUser.id },
-        data: { phone, lastName, firstName },
+        data: {
+          phone,
+          lastName,
+          firstName,
+          ...(sessionUser.privacyConsentAt
+            ? {}
+            : { privacyConsentAt: consentNow }),
+        },
       });
     }
 
     const userId = owner.id;
-    const resolvedItems = await this.resolveItems(dto.items);
+    const inventoryEnabled = await this.settings.isInventoryEnabled();
+    const resolvedItems = await this.resolveItems(dto.items, inventoryEnabled);
     const merchandiseTotal = resolvedItems.reduce(
       (s, i) => s + i.price * i.qty,
       0,
@@ -300,7 +358,22 @@ export class OrdersService {
       }
     }
 
-    const inventoryEnabled = await this.settings.isInventoryEnabled();
+    let storePickupAt: Date | null = null;
+    let storePickupAddress: string | null = null;
+    if (deliveryCode === DeliveryMethodCode.PICKUP) {
+      const raw = dto.storePickupAt?.trim();
+      if (!raw) {
+        throw new BadRequestException('Выберите дату и время самовывоза');
+      }
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException('Некорректная дата самовывоза');
+      }
+      const settings = await this.pickup.assertValidSlot(parsed);
+      storePickupAt = parsed;
+      storePickupAddress = settings.address;
+    }
+
     const order = await this.prisma.$transaction(async (tx) => {
       if (promoApplied?.promoCodeId) {
         await this.promos.incrementRedemption(promoApplied.promoCodeId, tx);
@@ -315,7 +388,9 @@ export class OrdersService {
           if (updated.count !== 1) {
             const fresh = await tx.productVariant.findUnique({
               where: { id: item.variantId },
-              include: { product: true },
+              include: {
+                product: { select: { name: true } },
+              },
             });
             throw new BadRequestException(
               `В наличии только ${fresh?.stock ?? 0} шт. — ${fresh?.product.name ?? 'товар'} (${fresh?.weight ?? ''})`,
@@ -337,6 +412,8 @@ export class OrdersService {
           deliveryTitle: dto.deliveryTitle.trim(),
           pickupLabel: dto.pickupLabel?.trim() || null,
           pickupCode,
+          storePickupAt,
+          storePickupAddress,
           subtotal,
           discountAmount,
           promoCodeId: promoApplied?.promoCodeId ?? null,
@@ -615,13 +692,9 @@ export class OrdersService {
       this.prisma.order.count({ where }),
     ]);
 
-    const items: Array<ReturnType<OrdersService['map']>> = [];
-    for (const order of orders) {
-      items.push(this.map(await this.syncDeliveryTracking(order)));
-    }
-
+    // List stays DB-only — carrier sync runs on get/reconcile + delivery poller.
     return {
-      items,
+      items: orders.map((order) => this.map(order)),
       total,
       page,
       limit,
@@ -773,12 +846,9 @@ export class OrdersService {
       counts[row.status] = all ?? 0;
     }
 
-    const synced = await Promise.all(
-      orders.map((order) => this.syncDeliveryTracking(order)),
-    );
-
+    // Admin list uses stored tracking; detail/get + poller refresh carriers.
     return {
-      items: synced.map((o) => this.mapAdmin(o)),
+      items: orders.map((o) => this.mapAdmin(o)),
       total,
       page,
       limit,
@@ -821,8 +891,75 @@ export class OrdersService {
     });
 
     this.maybeNotifyStatusMail(existing.status, order);
+    if (status === OrderStatus.PAID && !existing.paidAt) {
+      void this.notifyStaffPaidOrder(order).catch((err) => {
+        this.logger.warn(
+          `Paid order staff mail failed for ${order.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+    }
 
     return this.mapAdmin(order);
+  }
+
+  private async notifyStaffPaidOrder(order: {
+    id: string;
+    number: number;
+    email: string;
+    phone: string;
+    lastName: string;
+    firstName: string;
+    deliveryTitle: string;
+    cityLabel: string;
+    total: number;
+    items: Array<{
+      productName: string;
+      weight: string;
+      price: number;
+      qty: number;
+    }>;
+  }) {
+    const recipients = await this.settings.getPaidOrderNotifyEmails();
+    if (!recipients.length) return;
+
+    const mail = buildPaidOrderStaffNotifyMail({
+      orderNumber: order.number,
+      total: order.total,
+      customerEmail: order.email,
+      customerName: formatPersonName({
+        lastName: order.lastName,
+        firstName: order.firstName,
+      }),
+      phone: order.phone,
+      deliveryTitle: order.deliveryTitle,
+      cityLabel: order.cityLabel,
+      webOrigin: this.webOrigin(),
+      items: order.items.map((i) => ({
+        productName: i.productName,
+        weight: i.weight,
+        qty: i.qty,
+        price: i.price,
+      })),
+    });
+
+    for (const to of recipients) {
+      try {
+        await this.sendMail({
+          to,
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Paid order staff mail failed for ${order.id} → ${to}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
   }
 
   private maybeNotifyStatusMail(
@@ -943,18 +1080,25 @@ export class OrdersService {
     items: Array<{ variantId: string | null; qty: number }>,
   ) {
     if (!(await this.settings.isInventoryEnabled())) return;
+    const byVariant = new Map<string, number>();
     for (const item of items) {
-      if (!item.variantId) continue;
+      if (!item.variantId || item.qty <= 0) continue;
+      byVariant.set(
+        item.variantId,
+        (byVariant.get(item.variantId) ?? 0) + item.qty,
+      );
+    }
+    for (const [variantId, qty] of byVariant) {
       await tx.productVariant.update({
-        where: { id: item.variantId },
-        data: { stock: { increment: item.qty } },
+        where: { id: variantId },
+        data: { stock: { increment: qty } },
       });
     }
   }
 
   /**
-   * Poll CDEK/Yandex for tracking when TTL expired.
-   * Safe on every list/get — skips when fresh or terminal.
+   * Poll CDEK/Yandex/Pochta for tracking when TTL expired.
+   * Used on order detail / reconcile / background poller — not on list endpoints.
    */
   async syncDeliveryTracking<
     T extends {
@@ -1253,6 +1397,8 @@ export class OrdersService {
     deliveryTitle: string;
     pickupLabel: string | null;
     pickupCode?: string | null;
+    storePickupAt?: Date | null;
+    storePickupAddress?: string | null;
     externalDeliveryId?: string | null;
     deliveryTrackNumber?: string | null;
     deliveryStatusCode?: string | null;
@@ -1296,6 +1442,8 @@ export class OrdersService {
       deliveryTitle: order.deliveryTitle,
       pickupLabel: order.pickupLabel,
       pickupCode: order.pickupCode ?? null,
+      storePickupAt: order.storePickupAt?.toISOString() ?? null,
+      storePickupAddress: order.storePickupAddress ?? null,
       externalDeliveryId: order.externalDeliveryId ?? null,
       deliveryTracking: hasTracking
         ? {

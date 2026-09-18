@@ -205,6 +205,7 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
         pickupCode: '190000',
         pickupLabel: 'ОПС 190000 — Санкт-Петербург, Невский пр., 1',
         items: [{ variantId: product.variants[0].id, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -525,15 +526,102 @@ describe('Pochta Rossii delivery (e2e, mocked)', () => {
       });
 
       const res = await request(trackingApp.getHttpServer())
-        .get('/api/orders')
+        .get(`/api/orders/${order.id}`)
         .set('Cookie', `${SESSION_COOKIE}=${raw}`)
         .expect(200);
 
-      const listed = res.body.items.find(
-        (o: { id: string }) => o.id === order.id,
-      );
-      expect(listed?.status).toBe('ARCHIVED');
-      expect(listed?.deliveryTracking?.statusCode).toBe('REMOVED');
+      expect(res.body.status).toBe('ARCHIVED');
+      expect(res.body.deliveryTracking?.statusCode).toBe('REMOVED');
+      // Non-numeric ids are rejected locally — no Otpravka round-trip.
+      expect(goneMock.calls).toHaveLength(0);
+
+      await prisma.order.delete({ where: { id: order.id } });
+      await prisma.session.deleteMany({ where: { userId: user.id } });
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+    } finally {
+      await trackingApp.close();
+    }
+  });
+
+  it('archives when Otpravka returns 400 BAD_REQUEST for a numeric id', async () => {
+    const goneMock = createMockPochtaFetch(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method || 'GET').toUpperCase();
+      if (
+        (url.includes('/1.0/shipment/') || url.includes('/1.0/backlog/')) &&
+        method === 'GET'
+      ) {
+        return jsonResponse(
+          { code: 'BAD_REQUEST', desc: 'Invalid request parameter' },
+          400,
+        );
+      }
+      return jsonResponse({ message: `unexpected ${method} ${url}` }, 500);
+    });
+
+    const { app: trackingApp } = await createTestApp({
+      pochtaFetch: goneMock.fetchMock,
+      pochta: 'present',
+      cdek: 'missing',
+      yandex: 'missing',
+    });
+    const prisma = trackingApp.get(PrismaService);
+
+    try {
+      await ensureDeliveryMethods(trackingApp);
+      const user = await prisma.user.upsert({
+        where: { email: 'pochta-track-400@example.com' },
+        create: { email: 'pochta-track-400@example.com', role: UserRole.USER },
+        update: { role: UserRole.USER },
+      });
+      const raw = createRawToken();
+      await prisma.session.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashToken(raw),
+          expiresAt: new Date(Date.now() + 86400000),
+        },
+      });
+
+      const order = await prisma.order.create({
+        data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          userId: user.id,
+          phone: '+79001112233',
+          contactChannel: 'Telegram',
+          cityLabel: 'Санкт-Петербург',
+          deliveryCode: DeliveryMethodCode.POST,
+          deliveryTitle: 'Почта России',
+          pickupCode: '190000',
+          externalDeliveryId: '999000111',
+          deliveryTrackNumber: '111',
+          status: OrderStatus.PAID,
+          paidAt: new Date(),
+          total: 500,
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 500,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const res = await request(trackingApp.getHttpServer())
+        .get(`/api/orders/${order.id}`)
+        .set('Cookie', `${SESSION_COOKIE}=${raw}`)
+        .expect(200);
+
+      expect(res.body.status).toBe('ARCHIVED');
+      expect(res.body.deliveryTracking?.statusCode).toBe('REMOVED');
 
       await prisma.order.delete({ where: { id: order.id } });
       await prisma.session.deleteMany({ where: { userId: user.id } });

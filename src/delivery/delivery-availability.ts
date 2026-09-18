@@ -27,10 +27,7 @@ export type DeliveryAvailability = DeliveryMethodRow & {
 };
 
 /** Shown in checkout but not selectable until re-enabled. */
-const BLOCKED_DELIVERY_CODES = new Set<DeliveryMethodCode>([
-  'PICKUP',
-  'OZON',
-]);
+const BLOCKED_DELIVERY_CODES = new Set<DeliveryMethodCode>(['OZON']);
 
 /** Pure location → availability mapping (unit-tested). */
 export function mapDeliveryAvailability(
@@ -43,6 +40,8 @@ export function mapDeliveryAvailability(
     ozonReady: boolean;
     yandexOrderReady: boolean;
     yandexMoscowOnly: boolean;
+    /** Optional note under Самовывоз (address + hours). */
+    pickupNote?: string;
   },
 ): DeliveryAvailability[] {
   const { region, label } = input;
@@ -57,10 +56,14 @@ export function mapDeliveryAvailability(
       return {
         ...m,
         available: false,
-        note:
-          m.code === 'PICKUP'
-            ? 'Самовывоз временно недоступен'
-            : 'Ozon Доставка временно недоступна',
+        note: 'Ozon Доставка временно недоступна',
+      };
+    }
+    if (m.code === 'PICKUP') {
+      return {
+        ...m,
+        available: true,
+        note: input.pickupNote ?? 'Выберите дату и время самовывоза',
       };
     }
     if (m.code === 'CDEK') {

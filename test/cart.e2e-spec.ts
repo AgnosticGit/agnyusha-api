@@ -1,7 +1,9 @@
 import type { INestApplication } from '@nestjs/common';
+import { testStorePickupAt } from './helpers/pickup-slot';
 import request from 'supertest';
 import { UserRole } from '@prisma/client';
 import { createTestApp, setSiteInventoryEnabled } from './helpers/cdek-test.helpers';
+import { loginAs } from './helpers/login-as';
 import { PrismaService } from '../src/prisma/prisma.service';
 import {
   CART_COOKIE,
@@ -19,28 +21,6 @@ function pickCookie(
     if (part.startsWith(`${name}=`)) return part;
   }
   return undefined;
-}
-
-async function loginAs(
-  app: INestApplication,
-  email: string,
-  role: UserRole = UserRole.USER,
-) {
-  const prisma = app.get(PrismaService);
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: { email, role },
-    update: { role },
-  });
-  const raw = createRawToken();
-  await prisma.session.create({
-    data: {
-      userId: user.id,
-      tokenHash: hashToken(raw),
-      expiresAt: new Date(Date.now() + 86400000),
-    },
-  });
-  return { user, cookie: `${SESSION_COOKIE}=${raw}` };
 }
 
 /** Seed a magic-link token in DB (avoids mail cooldown / IP rate limits across the suite). */
@@ -486,7 +466,9 @@ describe('Cart guest persist & merge (e2e)', () => {
         cityLabel: 'Санкт-Петербург',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId, qty: 2 }],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -517,7 +499,9 @@ describe('Cart guest persist & merge (e2e)', () => {
         cityLabel: 'Москва',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(201);
 
@@ -553,7 +537,9 @@ describe('Cart guest persist & merge (e2e)', () => {
         cityLabel: 'Казань',
         deliveryCode: 'PICKUP',
         deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
         items: [{ variantId, qty: 1 }],
+        privacyConsent: true,
       })
       .expect(201);
 
