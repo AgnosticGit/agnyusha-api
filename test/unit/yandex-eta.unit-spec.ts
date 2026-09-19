@@ -1,6 +1,9 @@
 import {
   YandexDeliveryService,
+  buildYandexOffersInfoAddress,
   normalizeYandexTime,
+  pickYandexOffer,
+  yandexDropoffReadyIntervalUtc,
 } from '../../src/yandex/yandex-delivery.service';
 import { etaFromIsoInterval } from '../../src/delivery/delivery-eta';
 import { ConfigService } from '@nestjs/config';
@@ -29,6 +32,85 @@ describe('normalizeYandexTime', () => {
   });
 });
 
+describe('yandexDropoffReadyIntervalUtc', () => {
+  it('uses tomorrow 07:00 UTC as ready-to-dropoff instant', () => {
+    const interval = yandexDropoffReadyIntervalUtc(
+      new Date('2026-09-19T15:30:00.000Z'),
+    );
+    expect(interval).toEqual({
+      from: '2026-09-20T07:00:00.000Z',
+      to: '2026-09-20T07:00:00.000Z',
+    });
+  });
+});
+
+describe('buildYandexOffersInfoAddress', () => {
+  it('adds stub street/house for city-only labels', () => {
+    expect(buildYandexOffersInfoAddress('Санкт-Петербург')).toBe(
+      'Санкт-Петербург, Центральная улица, 1',
+    );
+  });
+
+  it('keeps a full address with house', () => {
+    expect(
+      buildYandexOffersInfoAddress('Санкт-Петербург, Невский пр., 10'),
+    ).toBe('Санкт-Петербург, Невский пр., 10');
+  });
+
+  it('returns null for empty input', () => {
+    expect(buildYandexOffersInfoAddress('')).toBeNull();
+    expect(buildYandexOffersInfoAddress(null)).toBeNull();
+  });
+});
+
+describe('pickYandexOffer', () => {
+  it('prefers the earliest delivery window', () => {
+    const picked = pickYandexOffer(
+      [
+        {
+          offer_id: 'late',
+          offer_details: {
+            delivery_interval: { min: '2026-09-25T07:00:00Z' },
+            pricing_total: '100 RUB',
+          },
+        },
+        {
+          offer_id: 'early',
+          offer_details: {
+            delivery_interval: { min: '2026-09-22T07:00:00Z' },
+            pricing_total: '160 RUB',
+          },
+        },
+      ],
+      new Date('2026-09-19T12:00:00Z'),
+    );
+    expect(picked?.offer_id).toBe('early');
+  });
+
+  it('skips expired offers when a fresh one exists', () => {
+    const picked = pickYandexOffer(
+      [
+        {
+          offer_id: 'expired',
+          expires_at: '2026-09-19T10:00:00Z',
+          offer_details: {
+            delivery_interval: { min: '2026-09-20T07:00:00Z' },
+          },
+        },
+        {
+          offer_id: 'fresh',
+          expires_at: '2026-09-19T18:00:00Z',
+          offer_details: {
+            delivery_interval: { min: '2026-09-22T07:00:00Z' },
+          },
+        },
+      ],
+      new Date('2026-09-19T12:00:00Z'),
+    );
+    expect(picked?.offer_id).toBe('fresh');
+  });
+});
+
 describe('YandexDeliveryService.estimateDeliveryEta', () => {
   function makeService(fetchFn: jest.Mock) {
     const config = {
@@ -46,11 +128,13 @@ describe('YandexDeliveryService.estimateDeliveryEta', () => {
     return new YandexDeliveryService(config, fetchFn);
   }
 
-  it('uses a single offers/info by address and never lists PVZs', async () => {
+  it('enriches city label and requests self_pickup ETA', async () => {
     const fetchFn = jest.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       expect(url).toContain('/offers/info');
-      expect(url).toContain('full_address=');
+      expect(url).toContain('last_mile_policy=self_pickup');
+      const decoded = decodeURIComponent(url.replace(/\+/g, '%20'));
+      expect(decoded).toContain('Центральная улица');
       expect(url).not.toContain('pickup-points');
       return new Response(
         JSON.stringify({
@@ -80,12 +164,8 @@ describe('YandexDeliveryService.estimateDeliveryEta', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  it('does not fall back to pickup-points when address offers are empty', async () => {
-    const fetchFn = jest.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/pickup-points/list')) {
-        throw new Error('pickup-points must not be called for ETA');
-      }
+  it('returns null when offers/info has no offers', async () => {
+    const fetchFn = jest.fn(async () => {
       return new Response(JSON.stringify({ offers: [] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },

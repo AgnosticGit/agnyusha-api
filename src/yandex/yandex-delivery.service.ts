@@ -210,6 +210,70 @@ export function normalizeYandexTime(
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+/**
+ * Ready-to-dropoff window for «сдача в ПВЗ».
+ * Docs: for PVZ source, interval start = when the parcel is ready;
+ * from/to may be the same instant.
+ */
+export function yandexDropoffReadyIntervalUtc(now = new Date()): {
+  from: string;
+  to: string;
+} {
+  const ready = new Date(now.getTime());
+  ready.setUTCDate(ready.getUTCDate() + 1);
+  ready.setUTCHours(7, 0, 0, 0); // ~10:00 Europe/Moscow
+  const iso = ready.toISOString();
+  return { from: iso, to: iso };
+}
+
+/**
+ * offers/info rejects city-only strings («Missing … house»).
+ * Checkout usually has «Санкт-Петербург» — add a stub street/house so ETA works.
+ */
+export function buildYandexOffersInfoAddress(raw?: string | null): string | null {
+  const text = raw?.trim();
+  if (!text) return null;
+  const commas = (text.match(/,/g) || []).length;
+  if (commas >= 2 && /\d/.test(text)) return text;
+  const city = text.split(',')[0]?.trim() || text;
+  if (city.length < 2) return null;
+  return `${city}, Центральная улица, 1`;
+}
+
+function parseYandexPriceRub(raw?: string | null): number | null {
+  if (!raw) return null;
+  const match = String(raw).replace(/\s/g, '').match(/(\d+(?:[.,]\d+)?)/);
+  if (!match) return null;
+  const n = Number(match[1].replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Earliest valid offer (by delivery_interval.min). */
+export function pickYandexOffer(
+  offers: YandexOffer[],
+  now = new Date(),
+): YandexOffer | undefined {
+  const nowMs = now.getTime();
+  const withId = offers.filter((o) => Boolean(o.offer_id));
+  const fresh = withId.filter((o) => {
+    if (!o.expires_at) return true;
+    const exp = new Date(o.expires_at).getTime();
+    return !Number.isNaN(exp) && exp > nowMs;
+  });
+  const list = fresh.length ? fresh : withId;
+  if (!list.length) return undefined;
+  return [...list].sort((a, b) => {
+    const aMin = a.offer_details?.delivery_interval?.min ?? '';
+    const bMin = b.offer_details?.delivery_interval?.min ?? '';
+    if (aMin !== bMin) return aMin < bMin ? -1 : aMin > bMin ? 1 : 0;
+    const aPrice =
+      parseYandexPriceRub(a.offer_details?.pricing_total) ?? Number.POSITIVE_INFINITY;
+    const bPrice =
+      parseYandexPriceRub(b.offer_details?.pricing_total) ?? Number.POSITIVE_INFINITY;
+    return aPrice - bPrice;
+  })[0];
+}
+
 @Injectable()
 export class YandexDeliveryService {
   private readonly logger = new Logger(YandexDeliveryService.name);
@@ -293,7 +357,7 @@ export class YandexDeliveryService {
         detail.includes('Pickups are not configured')
       ) {
         throw new BadRequestException(
-          'Яндекс: для склада отгрузки не настроен график отгрузки (pickups). Проверьте склад в кабинете Яндекс Доставки.',
+          'Яндекс: точка отгрузки не принимает сдачу (pickups). Проверьте YANDEX_PLATFORM_STATION_ID — нужен ПВЗ/СЦ сдачи, а не склад с забором.',
         );
       }
       if (res.status >= 400 && res.status < 500) {
@@ -389,9 +453,9 @@ export class YandexDeliveryService {
   }
 
   /**
-   * Approximate ETA to a city via offers/info by address (one HTTP call).
-   * Do not probe PVZs here — listing city points + serial offers/info made
-   * checkout «Загружаем варианты…» wait many seconds for little gain.
+   * City-level ETA via offers/info (one HTTP call).
+   * Uses a stub street/house when checkout only has the city name —
+   * Yandex rejects bare locality without house.
    * Failures return null — never throw to callers.
    */
   async estimateDeliveryEta(
@@ -402,11 +466,12 @@ export class YandexDeliveryService {
     if (!Number.isInteger(geoId) || geoId < 1) return null;
 
     try {
-      const address = options?.fullAddress?.trim();
+      const address = buildYandexOffersInfoAddress(options?.fullAddress);
       if (!address) return null;
 
       const byAddress = await this.fetchOffersInfoEta({
         full_address: address,
+        last_mile_policy: 'self_pickup',
       });
       return byAddress.eta;
     } catch (err) {
@@ -567,6 +632,8 @@ export class YandexDeliveryService {
         platform_station: {
           platform_id: this.platformStationId,
         },
+        // Сдача в ПВЗ: начало интервала = готовность посылки к сдаче.
+        interval_utc: yandexDropoffReadyIntervalUtc(),
       },
       destination: {
         type: 'platform_station',
@@ -617,7 +684,7 @@ export class YandexDeliveryService {
       { method: 'POST', body: offerBody },
     );
 
-    const offer = offersResponse.offers?.[0];
+    const offer = pickYandexOffer(offersResponse.offers || []);
     if (!offer?.offer_id) {
       throw new ServiceUnavailableException(
         'Яндекс Доставка не вернула доступный тариф',

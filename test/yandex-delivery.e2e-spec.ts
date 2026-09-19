@@ -80,10 +80,21 @@ describe('Cities + Yandex Delivery (e2e, mocked Yandex)', () => {
         const body = JSON.parse(String(init?.body || '{}')) as {
           info?: { operator_request_id?: string };
           items?: Array<{ article?: string }>;
+          source?: {
+            platform_station?: { platform_id?: string };
+            interval_utc?: { from?: string; to?: string };
+          };
         };
         expect(body.info?.operator_request_id).toMatch(/^\d+$/);
         expect(body.items?.[0]?.article).toBeTruthy();
         expect(body.items?.[0]?.article).not.toMatch(/^cm[a-z0-9]{20,}$/i);
+        expect(body.source?.platform_station?.platform_id).toBeTruthy();
+        expect(body.source?.interval_utc?.from).toMatch(
+          /^\d{4}-\d{2}-\d{2}T/,
+        );
+        expect(body.source?.interval_utc?.to).toBe(
+          body.source?.interval_utc?.from,
+        );
         return jsonResponse({
           offers: [
             {
