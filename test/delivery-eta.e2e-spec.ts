@@ -52,25 +52,18 @@ describe('Delivery methods ETA (e2e)', () => {
       }
       if (url.includes('/offers/info') && method === 'GET') {
         expect(url).toContain('station_id=');
-        if (url.includes('full_address=')) {
-          return jsonResponse({
-            offers: [
-              {
-                from: '2026-09-15T07:00:00.000Z',
-                to: '2026-09-15T15:00:00.000Z',
-              },
-              {
-                from: '2026-09-16T07:00:00.000Z',
-                to: '2026-09-16T15:00:00.000Z',
-              },
-            ],
-          });
-        }
+        expect(url).toContain('last_mile_policy=self_pickup');
+        const decoded = decodeURIComponent(url.replace(/\+/g, '%20'));
+        expect(decoded).toContain('Центральная улица');
         return jsonResponse({
           offers: [
             {
               from: '2026-09-15T07:00:00.000Z',
-              to: '2026-09-16T07:00:00.000Z',
+              to: '2026-09-15T15:00:00.000Z',
+            },
+            {
+              from: '2026-09-16T07:00:00.000Z',
+              to: '2026-09-16T15:00:00.000Z',
             },
           ],
         });
