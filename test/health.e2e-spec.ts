@@ -133,9 +133,11 @@ describe('Health (e2e)', () => {
       UserRole.ADMIN,
     );
     const prisma = app.get(PrismaService);
+    await prisma.hostMetricHourly.deleteMany();
     await prisma.hostMetricHourly.create({
       data: {
-        recordedAt: new Date('2026-09-16T12:00:00.000Z'),
+        // Must stay inside HOURLY_RETENTION_MS (3 days) — fixed old dates fall out of the query.
+        recordedAt: new Date(Date.now() - 60_000),
         memTotalMb: 956,
         memAvailableMb: 400,
         memUsedPct: 58,
@@ -162,13 +164,12 @@ describe('Health (e2e)', () => {
     );
     expect(Array.isArray(res.body.live)).toBe(true);
     expect(Array.isArray(res.body.hourly)).toBe(true);
-    expect(res.body.hourly.length).toBeGreaterThanOrEqual(1);
-    expect(res.body.hourly[0]).toEqual(
+    expect(res.body.hourly).toEqual([
       expect.objectContaining({
         memAvailableMb: 400,
         source: 'host',
       }),
-    );
+    ]);
   });
 
   it('GET /api/admin/health/metrics requires auth', async () => {
