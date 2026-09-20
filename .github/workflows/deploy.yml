@@ -50,6 +50,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Guard env keys for VPS
+        run: node scripts/check-deploy-env.mjs
+
       - name: Sync deploy configs
         uses: appleboy/scp-action@v0.1.7
         with:
