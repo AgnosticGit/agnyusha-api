@@ -6,6 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
+import { isSuperAdminEmail } from '../auth/super-admin';
 import {
   CART_COOKIE,
   CART_TTL_MS,
@@ -44,6 +45,7 @@ type VariantWithProduct = {
     image: string;
     slug: string;
     isActive: boolean;
+    staffOnly: boolean;
   };
 };
 
@@ -92,6 +94,7 @@ export class CartService {
             image: true,
             slug: true,
             isActive: true,
+            staffOnly: true,
           },
         },
       },
@@ -107,6 +110,7 @@ export class CartService {
     raw: Array<{ variantId: string; qty: number }>,
     variants: Map<string, VariantWithProduct>,
     inventoryEnabled: boolean,
+    viewerEmail?: string | null,
   ): { items: CartLineView[]; adjustments: CartAdjustments } {
     const adjustments = emptyAdjustments();
     const items: CartLineView[] = [];
@@ -123,7 +127,10 @@ export class CartService {
         });
         continue;
       }
-      if (!variant.product.isActive) {
+      if (
+        !variant.product.isActive ||
+        (variant.product.staffOnly && !isSuperAdminEmail(viewerEmail))
+      ) {
         adjustments.removed.push({
           variantId: line.variantId,
           reason: 'inactive',
@@ -181,6 +188,7 @@ export class CartService {
   private async buildCartResponse(
     cartId: string,
     raw: Array<{ variantId: string; qty: number }>,
+    viewerEmail?: string | null,
   ): Promise<CartResponse> {
     const variants = await this.loadVariants(raw.map((i) => i.variantId));
     const inventoryEnabled = await this.settings.isInventoryEnabled();
@@ -188,6 +196,7 @@ export class CartService {
       raw,
       variants,
       inventoryEnabled,
+      viewerEmail,
     );
     if (adjustments.removed.length || adjustments.capped.length) {
       await this.persistSanitized(cartId, items);
@@ -232,6 +241,15 @@ export class CartService {
       return null;
     }
     return cart;
+  }
+
+  private async emailForUser(userId?: string): Promise<string | null> {
+    if (!userId) return null;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    return user?.email ?? null;
   }
 
   private async findUserCart(userId: string): Promise<CartRow | null> {
@@ -309,12 +327,14 @@ export class CartService {
       variantId,
       qty,
     }));
+    const email = await this.emailForUser(userId);
     const variants = await this.loadVariants(raw.map((r) => r.variantId));
     const inventoryEnabled = await this.settings.isInventoryEnabled();
     const { items, adjustments } = this.sanitizeLines(
       raw,
       variants,
       inventoryEnabled,
+      email,
     );
     await this.persistSanitized(userCart.id, items);
     await this.prisma.cart
@@ -326,6 +346,7 @@ export class CartService {
   }
 
   async getCartForUser(userId: string): Promise<CartResponse> {
+    const email = await this.emailForUser(userId);
     const cart = await this.ensureUserCart(userId);
     const variants = await this.loadVariants(
       cart.items.map((i) => i.variantId),
@@ -335,6 +356,7 @@ export class CartService {
       cart.items,
       variants,
       inventoryEnabled,
+      email,
     );
     if (adjustments.removed.length || adjustments.capped.length) {
       await this.persistSanitized(cart.id, items);
@@ -428,6 +450,10 @@ export class CartService {
     }
     if (!variant.product.isActive) {
       throw new BadRequestException('Товар снят с продажи');
+    }
+    const viewerEmail = await this.emailForUser(opts.userId);
+    if (variant.product.staffOnly && !isSuperAdminEmail(viewerEmail)) {
+      throw new BadRequestException('Товар недоступен для заказа');
     }
     const inventoryEnabled = await this.settings.isInventoryEnabled();
     if (inventoryEnabled && variant.stock <= 0) {

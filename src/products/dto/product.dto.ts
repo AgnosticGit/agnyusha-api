@@ -153,6 +153,10 @@ export class UpsertProductDto {
   @IsOptional()
   @IsBoolean()
   isPopular?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  staffOnly?: boolean;
 }
 
 export class UpdateStockDto {

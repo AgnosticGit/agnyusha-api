@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DeliveryMethodCode, OrderStatus, Prisma } from '@prisma/client';
+import { isSuperAdminEmail } from '../auth/super-admin';
 import { PrismaService } from '../prisma/prisma.service';
 import { CartService } from '../cart/cart.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -126,6 +127,7 @@ export class OrdersService {
   private async resolveItems(
     items: CreateOrderDto['items'],
     inventoryEnabled?: boolean,
+    viewerEmail?: string | null,
   ): Promise<ResolvedLine[]> {
     const inventoryOn =
       inventoryEnabled ?? (await this.settings.isInventoryEnabled());
@@ -146,6 +148,7 @@ export class OrdersService {
             name: true,
             image: true,
             isActive: true,
+            staffOnly: true,
           },
         },
       },
@@ -156,7 +159,11 @@ export class OrdersService {
       const variantId = item.variantId!.trim();
       const variant = byId.get(variantId);
 
-      if (!variant || !variant.product.isActive) {
+      if (
+        !variant ||
+        !variant.product.isActive ||
+        (variant.product.staffOnly && !isSuperAdminEmail(viewerEmail))
+      ) {
         throw new BadRequestException(
           'Товар недоступен для заказа — обновите корзину',
         );
@@ -298,7 +305,11 @@ export class OrdersService {
 
     const userId = owner.id;
     const inventoryEnabled = await this.settings.isInventoryEnabled();
-    const resolvedItems = await this.resolveItems(dto.items, inventoryEnabled);
+    const resolvedItems = await this.resolveItems(
+      dto.items,
+      inventoryEnabled,
+      email,
+    );
     const merchandiseTotal = resolvedItems.reduce(
       (s, i) => s + i.price * i.qty,
       0,

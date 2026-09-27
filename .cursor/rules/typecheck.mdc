@@ -1,0 +1,17 @@
+---
+description: Before finishing a task, typecheck every repo whose code changed
+alwaysApply: true
+---
+
+# Typecheck before handoff
+
+Jest, Vitest, and Playwright do not catch every TypeScript error that `npm run prod` and `npm run prod:ngrok` hit.
+
+Before declaring a task done, if you changed TypeScript or TSX in a repo, run that repo's typecheck and fix every error it reports:
+
+- `agnyusha-api`: `npm run typecheck` (`tsc -p tsconfig.build.json --noEmit`)
+- `agnyusha-web`: `npm run typecheck` (`tsc --noEmit`)
+
+Run it in each repo you edited, not only the one with tests. Docs-only or markdown changes do not need it.
+
+Do not treat a green test run as a green typecheck.
