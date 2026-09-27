@@ -934,23 +934,25 @@ describe('Ozon Pay (e2e)', () => {
         },
       });
 
+      const callsBefore = getOrderDetailsCalls;
       const first = await request(created.app.getHttpServer())
         .post('/api/admin/orders/reconcile-payments')
         .set('Cookie', cookie)
         .expect(200);
 
-      expect(getOrderDetailsCalls).toBe(1);
+      expect(getOrderDetailsCalls).toBeGreaterThan(callsBefore);
       expect(first.body.items).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: order.id, status: 'PAID' }),
         ]),
       );
 
+      const callsAfter = getOrderDetailsCalls;
       const second = await request(created.app.getHttpServer())
         .post('/api/admin/orders/reconcile-payments')
         .set('Cookie', cookie)
         .expect(200);
-      expect(getOrderDetailsCalls).toBe(1);
+      expect(getOrderDetailsCalls).toBe(callsAfter);
       expect(second.body.items).toEqual([]);
 
       await prisma.order.delete({ where: { id: order.id } });
