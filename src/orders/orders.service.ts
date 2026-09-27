@@ -740,6 +740,30 @@ export class OrdersService {
     return { items };
   }
 
+  /** Staff order list: up to 10 unpaid orders per minute, same Ozon check as the account. */
+  async reconcilePaymentsForAdmin() {
+    const paidIds = await this.payments.reconcileUnpaidOrdersForAdmin();
+    if (paidIds.length === 0) {
+      return { items: [] as Array<ReturnType<OrdersService['map']>> };
+    }
+
+    const orders = await this.prisma.order.findMany({
+      where: { id: { in: paidIds } },
+      include: {
+        items: {
+          include: {
+            product: { select: { slug: true, isActive: true } },
+          },
+        },
+        user: { select: { email: true } },
+      },
+    });
+
+    return {
+      items: orders.map((order) => this.map(order)),
+    };
+  }
+
   async getForUser(userId: string, orderId: string) {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, userId },

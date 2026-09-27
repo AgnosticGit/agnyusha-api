@@ -6,6 +6,8 @@
 
 Ozon Delivery в этот опрос не входит. Самовывоз — тоже: у него нет внешнего API.
 
+Как заказ доходит до этой очереди — в [order-delivery-payment.md](./order-delivery-payment.md).
+
 ## Где вызывается sync
 
 | Место | Что происходит |
