@@ -61,6 +61,9 @@ export class PaymentsService {
   private readonly markPaidChain = new Map<string, Promise<void>>();
   private static readonly RECONCILE_TTL_MS = 45_000;
   private static readonly RECONCILE_MAX_PER_CALL = 3;
+  /** Admin list: at most 10 Ozon checks per minute, shared across staff. */
+  private static readonly ADMIN_RECONCILE_TTL_MS = 60_000;
+  private static readonly ADMIN_RECONCILE_MAX_PER_CALL = 10;
 
   constructor(
     private readonly config: ConfigService,
@@ -399,31 +402,56 @@ export class PaymentsService {
     userId: string,
     orderIds?: string[],
   ): Promise<string[]> {
+    return this.reconcileUnpaidOrders({
+      userId,
+      orderIds,
+      maxPerCall: PaymentsService.RECONCILE_MAX_PER_CALL,
+      ttlMs: PaymentsService.RECONCILE_TTL_MS,
+      candidateTake: 20,
+    });
+  }
+
+  /** Unpaid NEW orders across all buyers. Capped at 10 checks per minute. */
+  async reconcileUnpaidOrdersForAdmin(): Promise<string[]> {
+    return this.reconcileUnpaidOrders({
+      maxPerCall: PaymentsService.ADMIN_RECONCILE_MAX_PER_CALL,
+      ttlMs: PaymentsService.ADMIN_RECONCILE_TTL_MS,
+      candidateTake: 40,
+    });
+  }
+
+  private async reconcileUnpaidOrders(options: {
+    userId?: string;
+    orderIds?: string[];
+    maxPerCall: number;
+    ttlMs: number;
+    candidateTake: number;
+  }): Promise<string[]> {
     if (!this.isConfigured()) return [];
 
     const candidates = await this.prisma.order.findMany({
       where: {
-        userId,
+        ...(options.userId ? { userId: options.userId } : {}),
         status: OrderStatus.NEW,
         paidAt: null,
         OR: [
           { paymentExternalId: { not: null } },
           { paymentPayLink: { not: null } },
         ],
-        ...(orderIds?.length ? { id: { in: orderIds } } : {}),
+        ...(options.orderIds?.length ? { id: { in: options.orderIds } } : {}),
       },
       select: { id: true, number: true },
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take: options.candidateTake,
     });
 
     const now = Date.now();
     const due = candidates
       .filter((order) => {
         const last = this.paymentReconcileAt.get(order.id) ?? 0;
-        return now - last >= PaymentsService.RECONCILE_TTL_MS;
+        return now - last >= options.ttlMs;
       })
-      .slice(0, PaymentsService.RECONCILE_MAX_PER_CALL);
+      .slice(0, options.maxPerCall);
 
     if (due.length === 0) return [];
 

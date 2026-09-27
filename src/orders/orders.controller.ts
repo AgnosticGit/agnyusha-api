@@ -129,6 +129,13 @@ export class AdminOrdersController {
     return this.orders.listAdmin(query);
   }
 
+  /** Same Ozon check as the buyer account, with a higher cap (10 / minute). */
+  @Post('reconcile-payments')
+  @HttpCode(200)
+  reconcilePayments() {
+    return this.orders.reconcilePaymentsForAdmin();
+  }
+
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @Body() body: UpdateOrderStatusDto) {
     return this.orders.updateStatus(id, body.status);

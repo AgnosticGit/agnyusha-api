@@ -12,6 +12,7 @@ import {
   hashToken,
   SESSION_COOKIE,
 } from '../src/auth/auth.crypto';
+import { loginAs } from './helpers/login-as';
 
 describe('Ozon Pay (e2e)', () => {
   let app: INestApplication;
@@ -864,6 +865,95 @@ describe('Ozon Pay (e2e)', () => {
 
       await prisma.order.delete({ where: { id: order.id } });
       await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+    } finally {
+      global.fetch = originalFetch;
+      delete process.env.OZON_PAY_ACCESS_KEY;
+      await created.app.close();
+    }
+  });
+
+  it('admin reconcile-payments marks unpaid NEW as PAID, then waits a minute', async () => {
+    let getOrderDetailsCalls = 0;
+    const originalFetch = global.fetch;
+    global.fetch = async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/getOrderDetails')) {
+        getOrderDetailsCalls += 1;
+        return new Response(
+          JSON.stringify({
+            item: { id: 'ozon-admin-reconcile-1', status: 'STATUS_PAID' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    process.env.OZON_PAY_ACCESS_KEY = 'test-access-key';
+    process.env.OZON_PAY_NOTIFICATION_SECRET = '';
+
+    const created = await createTestApp({
+      cdek: 'missing',
+      yandex: 'missing',
+      ozon: 'present',
+    });
+    const prisma = created.app.get(PrismaService);
+
+    try {
+      const { cookie } = await loginAs(
+        created.app,
+        'admin-reconcile@example.com',
+        UserRole.ADMIN,
+      );
+      const order = await prisma.order.create({
+        data: {
+          email: 'buyer@example.com',
+          lastName: 'Иванов',
+          firstName: 'Иван',
+          status: 'NEW',
+          phone: '+79990001122',
+          contactChannel: 'telegram',
+          cityLabel: 'Москва',
+          deliveryCode: 'PICKUP',
+          deliveryTitle: 'Самовывоз',
+          paymentExternalId: 'ozon-admin-reconcile-1',
+          paymentPayLink: 'https://checkout.ozon.ru/order/ozon-admin-reconcile-1',
+          total: 100,
+          items: {
+            create: [
+              {
+                productName: 'Корм',
+                image: '/assets/product-turkey.png',
+                weight: '1 кг.',
+                weightGrams: 1000,
+                price: 100,
+                qty: 1,
+              },
+            ],
+          },
+        },
+      });
+
+      const first = await request(created.app.getHttpServer())
+        .post('/api/admin/orders/reconcile-payments')
+        .set('Cookie', cookie)
+        .expect(200);
+
+      expect(getOrderDetailsCalls).toBe(1);
+      expect(first.body.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: order.id, status: 'PAID' }),
+        ]),
+      );
+
+      const second = await request(created.app.getHttpServer())
+        .post('/api/admin/orders/reconcile-payments')
+        .set('Cookie', cookie)
+        .expect(200);
+      expect(getOrderDetailsCalls).toBe(1);
+      expect(second.body.items).toEqual([]);
+
+      await prisma.order.delete({ where: { id: order.id } });
     } finally {
       global.fetch = originalFetch;
       delete process.env.OZON_PAY_ACCESS_KEY;
