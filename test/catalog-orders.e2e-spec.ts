@@ -1076,4 +1076,153 @@ describe('Catalog admin & orders (e2e)', () => {
       .set('Cookie', admin.cookie)
       .expect(200);
   });
+
+  it('staff-only product is visible and orderable only by the owner', async () => {
+    const owner = await loginAs(app, 'agnostex@gmail.com', UserRole.ADMIN);
+    const other = await loginAs(app, 'staff-catalog@example.com', UserRole.ADMIN);
+    const sku = uniqueSku('STAFF-ONLY');
+    const created = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', owner.cookie)
+      .send({
+        name: 'Служебный корм',
+        category: 'DOGS',
+        staffOnly: true,
+        variants: [
+          {
+            sku,
+            weight: '0,4 кг.',
+            weightGrams: 400,
+            lengthCm: 20,
+            widthCm: 15,
+            heightCm: 10,
+            price: 100,
+            stock: 5,
+          },
+        ],
+      })
+      .expect(201);
+
+    expect(created.body.staffOnly).toBe(true);
+    const slug = created.body.slug as string;
+    const variantId = created.body.variants[0].id as string;
+
+    const denied = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', other.cookie)
+      .send({
+        name: 'Чужой служебный',
+        category: 'CATS',
+        staffOnly: true,
+        variants: [
+          {
+            sku: uniqueSku('STAFF-DENY'),
+            weight: '0,4 кг.',
+            weightGrams: 400,
+            lengthCm: 20,
+            widthCm: 15,
+            heightCm: 10,
+            price: 100,
+            stock: 1,
+          },
+        ],
+      })
+      .expect(403);
+
+    expect(String(denied.body.message)).toMatch(/владелец/i);
+
+    const publicList = await request(app.getHttpServer())
+      .get('/api/products')
+      .expect(200);
+    expect(
+      (publicList.body as Array<{ slug: string }>).some((p) => p.slug === slug),
+    ).toBe(false);
+
+    await request(app.getHttpServer())
+      .get(`/api/products/${slug}`)
+      .expect(404);
+
+    const ownerList = await request(app.getHttpServer())
+      .get('/api/products')
+      .set('Cookie', owner.cookie)
+      .expect(200);
+    expect(
+      (ownerList.body as Array<{ slug: string }>).some((p) => p.slug === slug),
+    ).toBe(true);
+
+    await request(app.getHttpServer())
+      .post('/api/orders')
+      .set('Cookie', other.cookie)
+      .send({
+        email: 'staff-catalog@example.com',
+        lastName: 'Иванов',
+        firstName: 'Иван',
+        phone: '+7 (900) 111-22-33',
+        contactChannel: 'Telegram',
+        cityLabel: 'Москва',
+        deliveryCode: 'PICKUP',
+        deliveryTitle: 'Самовывоз',
+        storePickupAt: testStorePickupAt(),
+        items: [{ variantId, qty: 1 }],
+        privacyConsent: true,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${created.body.id}`)
+      .set('Cookie', owner.cookie)
+      .expect(200);
+  });
+
+  it('only the owner can duplicate a product', async () => {
+    const owner = await loginAs(app, 'agnostex@gmail.com', UserRole.ADMIN);
+    const other = await loginAs(app, 'staff-copy@example.com', UserRole.ADMIN);
+    const created = await request(app.getHttpServer())
+      .post('/api/admin/products')
+      .set('Cookie', owner.cookie)
+      .send({
+        name: 'Корм для копии',
+        category: 'DOGS',
+        variants: [
+          {
+            sku: uniqueSku('COPY-SRC'),
+            weight: '0,8 кг.',
+            weightGrams: 800,
+            lengthCm: 20,
+            widthCm: 15,
+            heightCm: 10,
+            price: 500,
+            stock: 4,
+          },
+        ],
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/admin/products/${created.body.id}/duplicate`)
+      .set('Cookie', other.cookie)
+      .expect(403);
+
+    const copy = await request(app.getHttpServer())
+      .post(`/api/admin/products/${created.body.id}/duplicate`)
+      .set('Cookie', owner.cookie)
+      .expect(201);
+
+    expect(copy.body.name).toBe('Корм для копии (копия)');
+    expect(copy.body.id).not.toBe(created.body.id);
+    expect(copy.body.variants[0].sku).toBe(
+      `${created.body.variants[0].sku}-COPY`,
+    );
+    expect(copy.body.variants[0].price).toBe(500);
+    expect(copy.body.variants[0].weightGrams).toBe(800);
+
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${copy.body.id}`)
+      .set('Cookie', owner.cookie)
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete(`/api/admin/products/${created.body.id}`)
+      .set('Cookie', owner.cookie)
+      .expect(200);
+  });
 });

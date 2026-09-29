@@ -165,6 +165,8 @@ model Product {
   isActive         Boolean             @default(true) @map("is_active")
   /// Curated homepage “Популярные товары” — only via admin checkbox.
   isPopular        Boolean             @default(false) @map("is_popular")
+  /// Visible and orderable only by the super-admin account.
+  staffOnly        Boolean             @default(false) @map("staff_only")
   /// Cached from visible reviews (updated on review write).
   ratingAverage    Float               @default(0) @map("rating_average")
   ratingCount      Int                 @default(0) @map("rating_count")

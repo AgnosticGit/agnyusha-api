@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import {
 } from './product.util';
 import { resolveBadgeRead, resolveBadgeWrite } from './badge.util';
 import { normalizeProductSections } from './product-sections.util';
+import { isSuperAdminEmail } from '../auth/super-admin';
 import { Prisma } from '@prisma/client';
 
 type ProductWithVariants = Product & { variants: ProductVariant[] };
@@ -72,6 +74,7 @@ export class ProductsService {
       sortOrder: product.sortOrder,
       isActive: product.isActive,
       isPopular: product.isPopular,
+      staffOnly: product.staffOnly,
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
     };
@@ -92,10 +95,30 @@ export class ProductsService {
     }
   }
 
-  async listPublic() {
+  private resolveStaffOnly(
+    requested: boolean | undefined,
+    current: boolean,
+    actorEmail?: string | null,
+  ): boolean {
+    if (!isSuperAdminEmail(actorEmail)) {
+      if (requested === true && !current) {
+        throw new ForbiddenException(
+          'Служебный товар может включить только владелец',
+        );
+      }
+      return current;
+    }
+    return requested ?? current;
+  }
+
+  async listPublic(viewerEmail?: string | null) {
+    const includeStaffOnly = isSuperAdminEmail(viewerEmail);
     // Catalog cards: name, image, badge, variants (stock/price) — skip galleries & nutrition.
     const items = await this.prisma.product.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        ...(includeStaffOnly ? {} : { staffOnly: false }),
+      },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
       select: {
         id: true,
@@ -113,6 +136,7 @@ export class ProductsService {
         sortOrder: true,
         isActive: true,
         isPopular: true,
+        staffOnly: true,
         createdAt: true,
         updatedAt: true,
         variants: {
@@ -252,10 +276,14 @@ export class ProductsService {
     return this.map(product);
   }
 
-  async getPublicBySlug(slug: string) {
+  async getPublicBySlug(slug: string, viewerEmail?: string | null) {
     const normalized = normalizeSlug(slug);
     const product = await this.prisma.product.findFirst({
-      where: { slug: normalized, isActive: true },
+      where: {
+        slug: normalized,
+        isActive: true,
+        ...(isSuperAdminEmail(viewerEmail) ? {} : { staffOnly: false }),
+      },
       include: this.includeVariants,
     });
     if (!product) throw new NotFoundException('Товар не найден');
@@ -311,7 +339,7 @@ export class ProductsService {
     }
   }
 
-  async create(dto: UpsertProductDto) {
+  async create(dto: UpsertProductDto, actorEmail?: string | null) {
     const variants = parseVariantInputs(dto.variants);
     if (!variants.length) {
       throw new BadRequestException('Добавьте хотя бы один вариант');
@@ -339,6 +367,7 @@ export class ProductsService {
         sortOrder: dto.sortOrder ?? 0,
         isActive: dto.isActive ?? true,
         isPopular: dto.isPopular ?? false,
+        staffOnly: this.resolveStaffOnly(dto.staffOnly, false, actorEmail),
         variants: {
           create: variants.map((v, index) => ({
             sku: v.sku,
@@ -358,8 +387,8 @@ export class ProductsService {
     return this.map(product);
   }
 
-  async update(id: string, dto: UpsertProductDto) {
-    await this.getById(id);
+  async update(id: string, dto: UpsertProductDto, actorEmail?: string | null) {
+    const existingProduct = await this.getById(id);
     const variants = parseVariantInputs(dto.variants);
     if (!variants.length) {
       throw new BadRequestException('Добавьте хотя бы один вариант');
@@ -441,12 +470,93 @@ export class ProductsService {
           sortOrder: dto.sortOrder ?? 0,
           isActive: dto.isActive ?? true,
           isPopular: dto.isPopular ?? false,
+          staffOnly: this.resolveStaffOnly(
+            dto.staffOnly,
+            existingProduct.staffOnly,
+            actorEmail,
+          ),
         },
         include: this.includeVariants,
       });
     });
 
     return this.map(product);
+  }
+
+  async duplicate(id: string, actorEmail?: string | null) {
+    if (!isSuperAdminEmail(actorEmail)) {
+      throw new ForbiddenException('Дублировать товар может только владелец');
+    }
+    const source = await this.prisma.product.findUnique({
+      where: { id },
+      include: this.includeVariants,
+    });
+    if (!source) throw new NotFoundException('Товар не найден');
+
+    const name = `${source.name.trim()} (копия)`;
+    const slug = await this.uniqueSlug(name);
+    const variants: Array<{
+      sku: string;
+      weight: string;
+      weightGrams: number;
+      lengthCm: number;
+      widthCm: number;
+      heightCm: number;
+      price: number;
+      stock: number;
+      sortOrder: number;
+    }> = [];
+    for (const [index, variant] of source.variants.entries()) {
+      variants.push({
+        sku: await this.uniqueCopySku(variant.sku),
+        weight: variant.weight,
+        weightGrams: variant.weightGrams,
+        lengthCm: variant.lengthCm,
+        widthCm: variant.widthCm,
+        heightCm: variant.heightCm,
+        price: variant.price,
+        stock: variant.stock,
+        sortOrder: variant.sortOrder ?? index,
+      });
+    }
+
+    const product = await this.prisma.product.create({
+      data: {
+        slug,
+        name,
+        subtitle: source.subtitle,
+        image: source.image,
+        images: source.images,
+        category: source.category,
+        badge: source.badge,
+        badgeLabel: source.badgeLabel,
+        badgeColor: source.badgeColor,
+        discountPercent: source.discountPercent,
+        sections: source.sections as Prisma.InputJsonValue,
+        nutritionProtein: source.nutritionProtein,
+        nutritionFat: source.nutritionFat,
+        nutritionCarbs: source.nutritionCarbs,
+        sortOrder: source.sortOrder,
+        isActive: source.isActive,
+        isPopular: source.isPopular,
+        staffOnly: source.staffOnly,
+        variants: { create: variants },
+      },
+      include: this.includeVariants,
+    });
+    return this.map(product);
+  }
+
+  private async uniqueCopySku(sku: string): Promise<string> {
+    const root = `${sku.trim().toUpperCase()}-COPY`.slice(0, 48);
+    for (let i = 0; i < 20; i += 1) {
+      const candidate = i === 0 ? root : `${root}-${i}`;
+      const taken = await this.prisma.productVariant.findUnique({
+        where: { sku: candidate },
+      });
+      if (!taken) return candidate;
+    }
+    throw new ConflictException(`Не удалось подобрать артикул для копии ${sku}`);
   }
 
   async remove(id: string) {

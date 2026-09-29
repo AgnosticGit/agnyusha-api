@@ -10,6 +10,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -24,9 +25,11 @@ import { ProductsService } from './products.service';
 import { UpdateStockDto, UpsertProductDto } from './dto/product.dto';
 import { ListInventoryDto } from './dto/list-inventory.dto';
 import {
+  OptionalAuthGuard,
   PermissionsGuard,
   ProductsAccessGuard,
   RequirePermissions,
+  type AuthedRequest,
 } from '../auth/auth.guard';
 import { SettingsService } from '../settings/settings.service';
 
@@ -121,13 +124,15 @@ export class ProductsController {
   ) {}
 
   @Get('products')
-  listPublic() {
-    return this.products.listPublic();
+  @UseGuards(OptionalAuthGuard)
+  listPublic(@Req() req: AuthedRequest) {
+    return this.products.listPublic(req.user?.email);
   }
 
   @Get('products/:slug')
-  getPublicBySlug(@Param('slug') slug: string) {
-    return this.products.getPublicBySlug(slug);
+  @UseGuards(OptionalAuthGuard)
+  getPublicBySlug(@Param('slug') slug: string, @Req() req: AuthedRequest) {
+    return this.products.getPublicBySlug(slug, req.user?.email);
   }
 
   @Get('admin/products')
@@ -146,15 +151,26 @@ export class ProductsController {
   @UseGuards(PermissionsGuard)
   @RequirePermissions(StaffPermission.PRODUCT_CREATE)
   @HttpCode(201)
-  create(@Body() body: UpsertProductDto) {
-    return this.products.create(body);
+  create(@Req() req: AuthedRequest, @Body() body: UpsertProductDto) {
+    return this.products.create(body, req.user?.email);
+  }
+
+  @Post('admin/products/:id/duplicate')
+  @UseGuards(PermissionsGuard)
+  @HttpCode(201)
+  duplicate(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.products.duplicate(id, req.user?.email);
   }
 
   @Patch('admin/products/:id')
   @UseGuards(PermissionsGuard)
   @RequirePermissions(StaffPermission.PRODUCT_EDIT)
-  update(@Param('id') id: string, @Body() body: UpsertProductDto) {
-    return this.products.update(id, body);
+  update(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: UpsertProductDto,
+  ) {
+    return this.products.update(id, body, req.user?.email);
   }
 
   @Delete('admin/products/:id')
