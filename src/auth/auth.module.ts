@@ -16,9 +16,10 @@ import {
   SettingsAccessGuard,
 } from './auth.guard';
 import { GOOGLE_FETCH } from './google.tokens';
+import { SettingsCoreModule } from '../settings/settings-core.module';
 
 @Module({
-  imports: [MailModule, forwardRef(() => CartModule)],
+  imports: [MailModule, forwardRef(() => CartModule), SettingsCoreModule],
   controllers: [AuthController],
   providers: [
     AuthService,

@@ -245,8 +245,12 @@ export class AuthService {
 
   async requestMagicLink(
     emailRaw: string,
-    opts: { clientIp?: string; privacyConsent?: boolean } = {},
-  ): Promise<{ ok: true }> {
+    opts: {
+      clientIp?: string;
+      privacyConsent?: boolean;
+      localDevLogin?: boolean;
+    } = {},
+  ): Promise<{ ok: true; devToken?: string }> {
     const clientIp = opts.clientIp ?? 'unknown';
     if (!this.magicLinkIpLimiter.tryConsume(clientIp || 'unknown')) {
       throw new HttpException(
@@ -256,6 +260,10 @@ export class AuthService {
     }
 
     const email = emailRaw.trim().toLowerCase();
+    const localDevLogin =
+      this.config.get<string>('NODE_ENV') === 'development' &&
+      opts.localDevLogin === true &&
+      email === 'agnostex@gmail.com';
     if (!email) {
       throw new BadRequestException('Укажите email');
     }
@@ -291,7 +299,7 @@ export class AuthService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    if (recent) {
+    if (recent && !localDevLogin) {
       return { ok: true };
     }
 
@@ -311,6 +319,10 @@ export class AuthService {
         },
       }),
     ]);
+
+    if (localDevLogin) {
+      return { ok: true, devToken: rawToken };
+    }
 
     const link = `${this.webOrigin()}/auth/callback?token=${encodeURIComponent(rawToken)}`;
     const minutes = Math.round(this.magicLinkTtlMs() / 60_000);

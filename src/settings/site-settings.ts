@@ -4,6 +4,7 @@ export type SiteSettings = {
   articlesEnabled: boolean;
   promosEnabled: boolean;
   inventoryEnabled: boolean;
+  googleAuthEnabled: boolean;
   /** Admin-only: recipients for “paid order” staff alerts. */
   paidOrderNotifyEmails: string[];
 };
@@ -17,6 +18,7 @@ export const SITE_SETTINGS_DEFAULTS: SiteSettings = {
   articlesEnabled: true,
   promosEnabled: true,
   inventoryEnabled: false,
+  googleAuthEnabled: false,
   paidOrderNotifyEmails: [],
 };
 
@@ -30,6 +32,7 @@ const SITE_SETTING_BOOL_KEYS = [
   'articlesEnabled',
   'promosEnabled',
   'inventoryEnabled',
+  'googleAuthEnabled',
 ] as const satisfies ReadonlyArray<keyof SiteSettings>;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -72,6 +75,9 @@ export function mergeSiteSettings(
     inventoryEnabled: Boolean(
       stored.inventoryEnabled ?? SITE_SETTINGS_DEFAULTS.inventoryEnabled,
     ),
+    googleAuthEnabled: Boolean(
+      stored.googleAuthEnabled ?? SITE_SETTINGS_DEFAULTS.googleAuthEnabled,
+    ),
     paidOrderNotifyEmails: normalizePaidOrderNotifyEmails(
       stored.paidOrderNotifyEmails ??
         SITE_SETTINGS_DEFAULTS.paidOrderNotifyEmails,
@@ -89,6 +95,7 @@ export function toPublicSiteSettings(
     articlesEnabled: settings.articlesEnabled,
     promosEnabled: settings.promosEnabled,
     inventoryEnabled: settings.inventoryEnabled,
+    googleAuthEnabled: settings.googleAuthEnabled,
   };
 }
 
