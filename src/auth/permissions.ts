@@ -20,6 +20,7 @@ export const ALL_STAFF_PERMISSIONS: StaffPermission[] = [
   StaffPermission.REVIEW_MANAGE,
   StaffPermission.SETTINGS_MANAGE,
   StaffPermission.PICKUP_MANAGE,
+  StaffPermission.SITE_PAGE_EDIT,
 ];
 
 export function isStaffRole(role: UserRole): boolean {

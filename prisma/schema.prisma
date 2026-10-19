@@ -36,6 +36,7 @@ enum StaffPermission {
   REVIEW_MANAGE
   SETTINGS_MANAGE
   PICKUP_MANAGE
+  SITE_PAGE_EDIT
 }
 
 enum ProductCategory {
