@@ -4,11 +4,22 @@ import {
   AdminSettingsController,
   PublicSettingsController,
 } from './settings.controller';
+import {
+  AdminSitePagesController,
+  PublicSitePagesController,
+} from './site-pages.controller';
+import { SitePagesService } from './site-pages.service';
 import { SettingsCoreModule } from './settings-core.module';
 
 @Module({
   imports: [AuthModule, SettingsCoreModule],
-  controllers: [PublicSettingsController, AdminSettingsController],
+  controllers: [
+    PublicSettingsController,
+    AdminSettingsController,
+    PublicSitePagesController,
+    AdminSitePagesController,
+  ],
+  providers: [SitePagesService],
   exports: [SettingsCoreModule],
 })
 export class SettingsModule {}
