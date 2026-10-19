@@ -36,6 +36,7 @@ import {
 import { resolveClientIp } from '../common/client-ip';
 import { CartService } from '../cart/cart.service';
 import { AuthGuard, type AuthedRequest } from './auth.guard';
+import { SettingsService } from '../settings/settings.service';
 
 /** Avoid Express query parser turning `+` into space (breaks Google auth codes). */
 function rawQueryParam(req: Request, name: string): string | undefined {
@@ -47,6 +48,14 @@ function rawQueryParam(req: Request, name: string): string | undefined {
   return value ?? undefined;
 }
 
+function isLoopbackAddress(address: string | undefined): boolean {
+  return (
+    address === '127.0.0.1' ||
+    address === '::1' ||
+    address === '::ffff:127.0.0.1'
+  );
+}
+
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -55,6 +64,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly config: ConfigService,
     private readonly cart: CartService,
+    private readonly settings: SettingsService,
   ) {}
 
   private secureCookies() {
@@ -88,6 +98,9 @@ export class AuthController {
     return this.auth.requestMagicLink(body.email, {
       clientIp: resolveClientIp(req),
       privacyConsent: body.privacyConsent,
+      localDevLogin:
+        this.config.get<string>('NODE_ENV') === 'development' &&
+        isLoopbackAddress(req.socket.remoteAddress),
     });
   }
 
@@ -169,7 +182,10 @@ export class AuthController {
   }
 
   @Get('google')
-  googleStart(@Req() req: Request, @Res() res: Response) {
+  async googleStart(@Req() req: Request, @Res() res: Response) {
+    if (!(await this.settings.getAll()).googleAuthEnabled) {
+      throw new ServiceUnavailableException('Вход через Google отключён');
+    }
     if (!this.auth.isGoogleConfigured()) {
       throw new ServiceUnavailableException('Вход через Google не настроен');
     }
@@ -200,6 +216,10 @@ export class AuthController {
         `${web}/auth/callback?error=${encodeURIComponent(reason)}`,
       );
     };
+
+    if (!(await this.settings.getAll()).googleAuthEnabled) {
+      return fail('google_disabled');
+    }
 
     const code = rawQueryParam(req, 'code');
     const state = rawQueryParam(req, 'state');

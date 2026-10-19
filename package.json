@@ -10,6 +10,7 @@
     "dev:ngrok": "node scripts/run-dev-ngrok.mjs",
     "prod": "cross-env NODE_ENV=production nest build && cross-env NODE_ENV=production node dist/src/main",
     "prod:ngrok": "node scripts/run-prod-ngrok.mjs",
+    "stop": "node scripts/kill-ports.mjs 3001",
     "dev:kill": "node scripts/kill-ports.mjs",
     "release": "npm run prod",
     "build": "nest build",

@@ -28,6 +28,10 @@ export class UpdateSiteSettingsDto {
   inventoryEnabled?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  googleAuthEnabled?: boolean;
+
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(20)
   @IsEmail({}, { each: true, message: 'Укажите корректный email' })
